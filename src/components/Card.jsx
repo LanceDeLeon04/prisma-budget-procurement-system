@@ -11,7 +11,6 @@ export default function Card({ title, value, subtitle, icon, accent = '#06b6d4',
           </span>
         )}
       </div>
-
       {loading ? (
         <div className="stat-card-skeleton">
           <div className="skeleton-line skeleton-line-lg" />
@@ -24,8 +23,6 @@ export default function Card({ title, value, subtitle, icon, accent = '#06b6d4',
           {subtitle && <div className="stat-card-subtitle">{subtitle}</div>}
         </>
       )}
-
-      <div className="stat-card-bar" style={{ background: accent }} />
     </div>
   )
 }
