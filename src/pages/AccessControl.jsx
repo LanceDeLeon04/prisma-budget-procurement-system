@@ -1,91 +1,85 @@
 import { useEffect, useState } from 'react'
 import PageLayout from '../components/PageLayout'
 import { accessAPI } from '../services/api'
+import { useRole } from '../hooks/useRole'
 
-const ROLE_CONFIG = {
-  admin:         { label:'Administrator',  color:'#ef4444', bg:'rgba(239,68,68,.1)'   },
-  it_staff:      { label:'IT Staff',        color:'#06b6d4', bg:'rgba(6,182,212,.1)'   },
-  regular_staff: { label:'Regular Staff',   color:'#10b981', bg:'rgba(16,185,129,.1)'  },
+const ROLE_CFG = {
+  admin:         { label:'Administrator', color:'#ef4444', bg:'rgba(239,68,68,.1)',  grad:'linear-gradient(135deg,#ef4444,#dc2626)' },
+  it_staff:      { label:'IT Staff',       color:'#06b6d4', bg:'rgba(6,182,212,.1)',  grad:'linear-gradient(135deg,#06b6d4,#3b82f6)' },
+  regular_staff: { label:'Regular Staff',  color:'#10b981', bg:'rgba(16,185,129,.1)', grad:'linear-gradient(135deg,#10b981,#059669)' },
 }
+const PlusIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+const CheckIcon = () => <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20,6 9,17 4,12"/></svg>
+const ShieldIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+const MonitorIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+const UserIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
 
-const AVATAR_GRADIENTS = {
-  admin:         'linear-gradient(135deg,#ef4444,#dc2626)',
-  it_staff:      'linear-gradient(135deg,#06b6d4,#3b82f6)',
-  regular_staff: 'linear-gradient(135deg,#10b981,#059669)',
-}
+const ROLE_ICONS = { admin: <ShieldIcon/>, it_staff: <MonitorIcon/>, regular_staff: <UserIcon/> }
 
 export default function AccessControl() {
-  const [users, setUsers]     = useState([])
-  const [roles, setRoles]     = useState([])
+  const { isAdmin } = useRole()
+  const [users, setUsers] = useState([])
+  const [roles, setRoles] = useState([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch]   = useState('')
+  const [search, setSearch] = useState('')
   const [filterRole, setFilterRole] = useState('all')
-  const [selected, setSelected]     = useState(null)
-  const [showAddUser, setShowAddUser] = useState(false)
+  const [selected, setSelected] = useState(null)
+  const [showAdd, setShowAdd] = useState(false)
   const [newUser, setNewUser] = useState({ name:'', username:'', email:'', role:'regular_staff', department:'' })
 
   useEffect(() => {
-    Promise.all([accessAPI.getUsers(), accessAPI.getRoles()]).then(([u,r]) => {
+    Promise.all([accessAPI.getUsers(), accessAPI.getRoles()]).then(([u, r]) => {
       setUsers(u); setRoles(r); setLoading(false)
     })
   }, [])
 
   const filtered = users.filter(u =>
-    (filterRole==='all' || u.role===filterRole) &&
+    (filterRole === 'all' || u.role === filterRole) &&
     (u.name.toLowerCase().includes(search.toLowerCase()) ||
      u.email.toLowerCase().includes(search.toLowerCase()) ||
      u.department.toLowerCase().includes(search.toLowerCase()))
   )
 
-  const handleAddUser = () => {
+  const handleAdd = () => {
     if (!newUser.name || !newUser.username) return
-    const id = users.length + 10
     setUsers(prev => [...prev, {
-      id, ...newUser, avatar: newUser.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2),
-      status:'active', lastLogin:'Never', permissions: ROLE_CONFIG[newUser.role]?.label ? ['Submit Requests'] : []
+      id: prev.length + 10, ...newUser,
+      avatar: newUser.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2),
+      status: 'active', lastLogin: 'Never',
+      permissions: ROLE_CFG[newUser.role] ? [ROLE_CFG[newUser.role].label + ' permissions'] : []
     }])
     setNewUser({ name:'', username:'', email:'', role:'regular_staff', department:'' })
-    setShowAddUser(false)
+    setShowAdd(false)
   }
 
-  const handleToggleStatus = (userId) => {
-    setUsers(prev => prev.map(u => u.id===userId ? {...u, status: u.status==='active'?'inactive':'active'} : u))
-  }
+  const toggleStatus = id => setUsers(prev => prev.map(u => u.id===id ? {...u, status: u.status==='active'?'inactive':'active'} : u))
 
   return (
-    <PageLayout
-      title="Access Control"
-      subtitle="Manage user accounts, roles, and system permissions"
-      badge="🔑 Security"
-      actions={<button className="btn-primary" onClick={()=>setShowAddUser(true)}>+ Add User</button>}
+    <PageLayout title="Access Control" subtitle="Manage user accounts, roles, and system permissions" badge="Access"
+      actions={isAdmin && <button className="btn btn-primary btn-sm" onClick={()=>setShowAdd(true)}><PlusIcon/> Add User</button>}
     >
-      {/* Role Overview Cards */}
-      <div className="role-cards-row">
+      {/* Role Hero Cards */}
+      <div className="role-hero-row">
         {roles.map(role => {
-          const rc = ROLE_CONFIG[role.id] || {}
-          const count = users.filter(u=>u.role===role.id).length
+          const rc = ROLE_CFG[role.id] || {}
+          const count = users.filter(u => u.role === role.id).length
           return (
-            <div
-              key={role.id}
-              className={`role-card ${filterRole===role.id?'role-card-active':''}`}
-              style={{ '--rc': rc.color }}
-              onClick={() => setFilterRole(filterRole===role.id?'all':role.id)}
-            >
-              <div className="role-card-bar" style={{ background: rc.color }} />
-              <div style={{ fontSize: 34, marginBottom: 10 }}>{role.icon}</div>
-              <div className="role-card-top">
-                <span className="role-card-count" style={{ color: rc.color }}>{count}</span>
-                <span className="role-badge" style={{ color: rc.color, background: rc.bg }}>{rc.label}</span>
+            <div key={role.id} className={`role-hero-card${filterRole===role.id?' selected':''}`}
+              style={{'--rhc': rc.color}} onClick={() => setFilterRole(filterRole===role.id?'all':role.id)}>
+              <div className="rh-icon" style={{ background:`${rc.color}15`, color: rc.color }}>
+                {ROLE_ICONS[role.id]}
               </div>
-              <div className="role-card-desc" style={{ marginBottom: 14 }}>{role.desc}</div>
-              <div style={{ display:'flex', flexDirection:'column', gap: 5 }}>
-                {role.permissions.slice(0,3).map(p => (
-                  <div key={p} style={{ fontSize: 12, color:'#64748b', display:'flex', alignItems:'center', gap: 6, fontWeight: 500 }}>
-                    <span style={{ color: rc.color, fontWeight: 900, fontSize: 11 }}>✓</span> {p}
+              <div className="rh-title">{rc.label}</div>
+              <div className="rh-count">{count} user{count!==1?'s':''}</div>
+              <div className="rh-desc">{role.desc||''}</div>
+              <div className="rh-perms">
+                {(role.permissions||[]).slice(0,4).map(p => (
+                  <div key={p} className="rh-perm">
+                    <span className="perm-check"><CheckIcon/></span>{p}
                   </div>
                 ))}
-                {role.permissions.length > 3 && (
-                  <div style={{ fontSize: 11.5, color:'#94a3b8', fontFamily:'JetBrains Mono,monospace' }}>+{role.permissions.length-3} more</div>
+                {(role.permissions||[]).length > 4 && (
+                  <div style={{fontSize:11,color:'#94a3b8',fontFamily:'JetBrains Mono,monospace',marginTop:2}}>+{role.permissions.length-4} more permissions</div>
                 )}
               </div>
             </div>
@@ -94,58 +88,46 @@ export default function AccessControl() {
       </div>
 
       {/* Filter bar */}
-      <div className="page-tabs">
-        <button className={`page-tab ${filterRole==='all'?'page-tab-active':''}`} onClick={()=>setFilterRole('all')}>
+      <div className="tabs">
+        <button className={`tab${filterRole==='all'?' active':''}`} onClick={() => setFilterRole('all')}>
           All Users <span className="tab-count">{users.length}</span>
         </button>
-        <input className="page-search" placeholder="Search users…" value={search} onChange={e=>setSearch(e.target.value)}/>
+        <input className="search-input" placeholder="Search users..." value={search} onChange={e => setSearch(e.target.value)}/>
       </div>
 
-      {/* Users Table */}
-      <div className="table-card">
+      {/* Users table */}
+      <div className="table-wrap">
         {loading ? (
-          <div style={{padding:24,display:'flex',flexDirection:'column',gap:12}}>
-            {[...Array(5)].map((_,i)=><div key={i} className="skeleton-line" style={{height:52,borderRadius:8}}/>)}
+          <div style={{padding:24,display:'flex',flexDirection:'column',gap:10}}>
+            {[...Array(5)].map((_,i)=><div key={i} className="sk-line" style={{height:50,borderRadius:8}}/>)}
           </div>
         ) : (
           <table className="data-table">
-            <thead>
-              <tr><th>User</th><th>Username</th><th>Department</th><th>Role</th><th>Last Login</th><th>Status</th><th>Actions</th></tr>
-            </thead>
+            <thead><tr><th>User</th><th>Username</th><th>Department</th><th>Role</th><th>Last Login</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
-              {filtered.map(user => {
-                const r = ROLE_CONFIG[user.role] || {}
+              {filtered.map(u => {
+                const rc = ROLE_CFG[u.role] || {}
                 return (
-                  <tr key={user.id} className="table-row" style={{ cursor:'pointer' }} onClick={()=>setSelected(user)}>
+                  <tr key={u.id} className="tr clickable" onClick={() => setSelected(u)}>
                     <td>
                       <div className="user-cell">
-                        <div className="user-avatar-sm" style={{ background: AVATAR_GRADIENTS[user.role]||'linear-gradient(135deg,#06b6d4,#3b82f6)' }}>
-                          {user.avatar}
-                        </div>
-                        <div>
-                          <div className="user-name">{user.name}</div>
-                          <div className="user-email">{user.email}</div>
-                        </div>
+                        <div className="user-av" style={{background: rc.grad||'linear-gradient(135deg,#06b6d4,#3b82f6)'}}>{u.avatar}</div>
+                        <div><div className="user-name">{u.name}</div><div className="user-email">{u.email}</div></div>
                       </div>
                     </td>
-                    <td><span className="mono-tag">{user.username}</span></td>
-                    <td>{user.department}</td>
-                    <td><span className="status-pill" style={{ color:r.color, background:r.bg }}>{r.label}</span></td>
-                    <td><span className="date-cell">{user.lastLogin}</span></td>
+                    <td><span className="mono">{u.username}</span></td>
+                    <td style={{fontSize:13,color:'#475569'}}>{u.department}</td>
+                    <td><span className="pill" style={{color:rc.color,background:rc.bg}}>{rc.label}</span></td>
+                    <td><span className="dt">{u.lastLogin}</span></td>
                     <td>
-                      <span className="status-pill" style={{
-                        color:  user.status==='active'?'#10b981':'#94a3b8',
-                        background: user.status==='active'?'rgba(16,185,129,.1)':'rgba(148,163,184,.1)'
-                      }}>
-                        {user.status==='active'?'● Active':'○ Inactive'}
+                      <span className="pill" style={{color:u.status==='active'?'#10b981':'#94a3b8',background:u.status==='active'?'rgba(16,185,129,.1)':'rgba(148,163,184,.1)'}}>
+                        {u.status==='active'?'Active':'Inactive'}
                       </span>
                     </td>
                     <td onClick={e=>e.stopPropagation()}>
-                      <div className="action-btns">
-                        <button className="btn-action" onClick={()=>setSelected(user)}>👁 View</button>
-                        <button className="btn-action" onClick={()=>handleToggleStatus(user.id)}>
-                          {user.status==='active'?'⏸ Disable':'▶ Enable'}
-                        </button>
+                      <div className="action-row">
+                        <button className="btn btn-ghost btn-sm" onClick={()=>setSelected(u)}>View</button>
+                        <button className="btn btn-ghost btn-sm" onClick={()=>toggleStatus(u.id)}>{u.status==='active'?'Disable':'Enable'}</button>
                       </div>
                     </td>
                   </tr>
@@ -156,101 +138,70 @@ export default function AccessControl() {
         )}
       </div>
 
-      {/* User Detail Modal */}
+      {/* User detail modal */}
       {selected && (
-        <div className="modal-overlay" onClick={()=>setSelected(null)}>
-          <div className="modal-box" onClick={e=>e.stopPropagation()}>
-            <div className="modal-header">
-              <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-                <div className="user-avatar-lg" style={{ background: AVATAR_GRADIENTS[selected.role]||'linear-gradient(135deg,#06b6d4,#3b82f6)' }}>
-                  {selected.avatar}
-                </div>
+        <div className="overlay" onClick={()=>setSelected(null)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{display:'flex',alignItems:'center',gap:14}}>
+                <div className="user-av user-av-lg" style={{background:ROLE_CFG[selected.role]?.grad||'linear-gradient(135deg,#06b6d4,#3b82f6)'}}>{selected.avatar}</div>
                 <div>
                   <h2 className="modal-title">{selected.name}</h2>
-                  <span className="status-pill" style={{ color:ROLE_CONFIG[selected.role]?.color, background:ROLE_CONFIG[selected.role]?.bg }}>
-                    {ROLE_CONFIG[selected.role]?.label}
-                  </span>
+                  <span className="pill" style={{color:ROLE_CFG[selected.role]?.color,background:ROLE_CFG[selected.role]?.bg}}>{ROLE_CFG[selected.role]?.label}</span>
                 </div>
               </div>
-              <button className="modal-close" onClick={()=>setSelected(null)}>✕</button>
+              <button className="modal-close" onClick={()=>setSelected(null)}>&times;</button>
             </div>
             <div className="modal-body">
-              <div className="modal-info-grid">
-                {[
-                  { label:'Username',   value:selected.username },
-                  { label:'Email',      value:selected.email },
-                  { label:'Department', value:selected.department },
-                  { label:'Last Login', value:selected.lastLogin },
-                  { label:'Status',     value:selected.status },
-                ].map(f=>(
-                  <div key={f.label} className="modal-info-item">
-                    <span className="modal-info-label">{f.label}</span>
-                    <span className="modal-info-value">{f.value}</span>
-                  </div>
+              <div className="info-grid">
+                {[{l:'Username',v:selected.username},{l:'Email',v:selected.email},{l:'Department',v:selected.department},{l:'Last Login',v:selected.lastLogin},{l:'Status',v:selected.status}].map(f=>(
+                  <div key={f.l} className="info-item"><span className="info-label">{f.l}</span><span className="info-value">{f.v}</span></div>
                 ))}
               </div>
-              <div style={{ marginTop:20 }}>
-                <span className="modal-info-label">Permissions</span>
-                <div className="permissions-list">
-                  {(selected.permissions||[]).map(p=>(
-                    <span key={p} className="perm-tag">{p}</span>
-                  ))}
+              <div style={{marginTop:18}}>
+                <div className="info-label" style={{marginBottom:8}}>Permissions</div>
+                <div className="perm-list">
+                  {(selected.permissions||[]).map(p=><span key={p} className="perm-tag">{p}</span>)}
                 </div>
               </div>
             </div>
-            <div className="modal-footer">
-              <button className="btn-primary">✏️ Edit User</button>
-              <button className="btn-danger" onClick={()=>{ handleToggleStatus(selected.id); setSelected(null) }}>
-                {selected.status==='active'?'⏸ Disable Account':'▶ Enable Account'}
-              </button>
-              <button className="btn-ghost" onClick={()=>setSelected(null)}>Close</button>
+            <div className="modal-foot">
+              <button className="btn btn-primary">Edit User</button>
+              <button className="btn btn-danger" onClick={()=>{toggleStatus(selected.id);setSelected(null)}}>{selected.status==='active'?'Disable':'Enable'}</button>
+              <button className="btn btn-ghost" onClick={()=>setSelected(null)}>Close</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Add User Modal */}
-      {showAddUser && (
-        <div className="modal-overlay" onClick={()=>setShowAddUser(false)}>
-          <div className="modal-box" onClick={e=>e.stopPropagation()}>
-            <div className="modal-header">
-              <h2 className="modal-title">Add New User</h2>
-              <button className="modal-close" onClick={()=>setShowAddUser(false)}>✕</button>
-            </div>
+      {/* Add user modal */}
+      {showAdd && (
+        <div className="overlay" onClick={()=>setShowAdd(false)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div className="modal-head"><h2 className="modal-title">Add New User</h2><button className="modal-close" onClick={()=>setShowAdd(false)}>&times;</button></div>
             <div className="modal-body">
               <div className="form-grid">
-                {[
-                  { label:'Full Name',   key:'name',       type:'text', placeholder:'e.g. Juan Dela Cruz' },
-                  { label:'Username',    key:'username',   type:'text', placeholder:'e.g. jdelacruz' },
-                  { label:'Email',       key:'email',      type:'email',placeholder:'user@prisma.gov.ph' },
-                  { label:'Department',  key:'department', type:'text', placeholder:'e.g. IT' },
-                ].map(f=>(
-                  <div key={f.key} className="form-field">
-                    <label className="login-label">{f.label}</label>
-                    <input className="login-input" type={f.type} placeholder={f.placeholder}
-                      value={newUser[f.key]} onChange={e=>setNewUser(p=>({...p,[f.key]:e.target.value}))}
-                      style={{padding:'12px 16px'}}/>
-                  </div>
-                ))}
-                <div className="form-field" style={{ gridColumn:'1/-1' }}>
-                  <label className="login-label">Role</label>
-                  <select className="login-input" value={newUser.role} onChange={e=>setNewUser(p=>({...p,role:e.target.value}))} style={{padding:'12px 16px'}}>
-                    <option value="admin">Administrator</option>
-                    <option value="it_staff">IT Staff</option>
-                    <option value="regular_staff">Regular Staff</option>
+                <div className="field"><label className="field-label">Full Name</label><input className="field-input" placeholder="e.g. Juan Dela Cruz" value={newUser.name} onChange={e=>setNewUser(p=>({...p,name:e.target.value}))}/></div>
+                <div className="field"><label className="field-label">Username</label><input className="field-input" placeholder="e.g. jdelacruz" value={newUser.username} onChange={e=>setNewUser(p=>({...p,username:e.target.value}))}/></div>
+                <div className="field"><label className="field-label">Email</label><input className="field-input" type="email" placeholder="user@prisma.gov.ph" value={newUser.email} onChange={e=>setNewUser(p=>({...p,email:e.target.value}))}/></div>
+                <div className="field"><label className="field-label">Department</label><input className="field-input" placeholder="e.g. Administration" value={newUser.department} onChange={e=>setNewUser(p=>({...p,department:e.target.value}))}/></div>
+                <div className="field form-full"><label className="field-label">Role</label>
+                  <select className="field-input field-select" value={newUser.role} onChange={e=>setNewUser(p=>({...p,role:e.target.value}))}>
+                    <option value="admin">Administrator — Full access</option>
+                    <option value="it_staff">IT Staff — Approve requests, shop, budget alerts</option>
+                    <option value="regular_staff">Regular Staff — Submit requests only</option>
                   </select>
                 </div>
-                {/* Role description */}
-                <div style={{ gridColumn:'1/-1', padding:'12px 16px', background:'rgba(6,182,212,.04)', border:'1px solid rgba(6,182,212,.12)', borderRadius:10, fontSize:13, color:'#475569' }}>
-                  {newUser.role==='admin' && '👑 Full system access — manages catalog, budget, users, and all reports.'}
-                  {newUser.role==='it_staff' && '🖥️ IT Department — shops catalog, processes requests, provides feedback, receives budget alerts.'}
-                  {newUser.role==='regular_staff' && '👤 Submit IT procurement requests and track their status only.'}
+                <div className="field form-full" style={{padding:'10px 14px',background:`${ROLE_CFG[newUser.role]?.color}0d`,border:`1px solid ${ROLE_CFG[newUser.role]?.color}22`,borderRadius:10,fontSize:13,color:'#475569',fontWeight:500}}>
+                  {newUser.role==='admin'&&'Full system access — manages catalog, budget, users, and all reports.'}
+                  {newUser.role==='it_staff'&&'IT Department — shops catalog, processes requests, provides feedback, receives budget alerts.'}
+                  {newUser.role==='regular_staff'&&'Any department — submits IT procurement requests and tracks their status only.'}
                 </div>
               </div>
             </div>
-            <div className="modal-footer">
-              <button className="btn-primary" onClick={handleAddUser}>Create User</button>
-              <button className="btn-ghost" onClick={()=>setShowAddUser(false)}>Cancel</button>
+            <div className="modal-foot">
+              <button className="btn btn-primary" onClick={handleAdd}>Create User</button>
+              <button className="btn btn-ghost" onClick={()=>setShowAdd(false)}>Cancel</button>
             </div>
           </div>
         </div>

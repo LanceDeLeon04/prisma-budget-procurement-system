@@ -1,20 +1,24 @@
-import Navbar from './Navbar'
+import { useState } from 'react'
+import Sidebar from './Sidebar'
 
 export default function PageLayout({ children, title, subtitle, badge, actions }) {
+  const [collapsed, setCollapsed] = useState(false)
   return (
-    <div className="dashboard-root">
-      <Navbar />
-      <main className="dashboard-main">
-        <div className="page-header">
-          <div className="page-header-left">
-            {badge && <span className="page-badge">{badge}</span>}
-            <h1 className="page-title">{title}</h1>
-            {subtitle && <p className="page-subtitle">{subtitle}</p>}
+    <div className="app-shell">
+      <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} />
+      <div className={`page-content${collapsed ? ' collapsed' : ''}`}>
+        <div className="page-body">
+          <div className="page-header">
+            <div className="page-header-left">
+              {badge && <div className="page-badge">{badge}</div>}
+              <h1 className="page-title">{title}</h1>
+              {subtitle && <p className="page-subtitle">{subtitle}</p>}
+            </div>
+            {actions && <div className="page-actions">{actions}</div>}
           </div>
-          {actions && <div className="page-header-actions">{actions}</div>}
+          {children}
         </div>
-        {children}
-      </main>
+      </div>
     </div>
   )
 }

@@ -1,0 +1,68 @@
+{
+  "hash": "d9498e0e",
+  "configHash": "9bb7e550",
+  "lockfileHash": "b8d2c40c",
+  "browserHash": "8531250f",
+  "optimized": {
+    "@reduxjs/toolkit": {
+      "src": "../../node_modules/@reduxjs/toolkit/dist/redux-toolkit.modern.mjs",
+      "file": "@reduxjs_toolkit.js",
+      "fileHash": "73de1796",
+      "needsInterop": false
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "49860b49",
+      "needsInterop": true
+    },
+    "react-redux": {
+      "src": "../../node_modules/react-redux/dist/react-redux.mjs",
+      "file": "react-redux.js",
+      "fileHash": "21b973ea",
+      "needsInterop": false
+    },
+    "react-router-dom": {
+      "src": "../../node_modules/react-router-dom/dist/index.mjs",
+      "file": "react-router-dom.js",
+      "fileHash": "85e6828a",
+      "needsInterop": false
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "16d658b1",
+      "needsInterop": true
+    },
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "c9a82653",
+      "needsInterop": true
+    },
+    "recharts": {
+      "src": "../../node_modules/recharts/es6/index.js",
+      "file": "recharts.js",
+      "fileHash": "232f1401",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "react-BDWiK9rz": {
+      "file": "react-BDWiK9rz.js",
+      "isDynamicEntry": false
+    },
+    "react-dom-C08K6auO": {
+      "file": "react-dom-C08K6auO.js",
+      "isDynamicEntry": false
+    },
+    "react-redux-Kuo2jauG": {
+      "file": "react-redux-Kuo2jauG.js",
+      "isDynamicEntry": false
+    },
+    "redux-toolkit.modern-CPtPWCA0": {
+      "file": "redux-toolkit.modern-CPtPWCA0.js",
+      "isDynamicEntry": false
+    }
+  }
+}
