@@ -54,10 +54,10 @@ export default function Dashboard() {
   const myRequests = requests.filter(r => isStaff ? r.requestedBy === user?.name : true)
   const pendingCount = requests.filter(r => (isITStaff || isAdmin) ? r.status === 'pending' || r.status === 'for_review' : r.requestedBy === user?.name && r.status === 'pending').length
 
-  const opexOver = summary && summary.opex.pct >= 80
-  const capexOver = summary && summary.capex.pct >= 80
-  const deptOpexOver = deptBudget && deptBudget.opex.pct >= 80
-  const deptCapexOver = deptBudget && deptBudget.capex.pct >= 80
+  const opexOver  = summary && summary.categories && (summary.categories.softwareLicense?.pct >= 80 || summary.categories.service?.pct >= 80)
+  const capexOver = summary && summary.categories && summary.categories.hardware?.pct >= 80
+  const deptOpexOver  = deptBudget && ((deptBudget.softwareLicense?.pct >= 80) || (deptBudget.service?.pct >= 80))
+  const deptCapexOver = deptBudget && deptBudget.hardware?.pct >= 80
 
   return (
     <PageLayout
@@ -78,9 +78,9 @@ export default function Dashboard() {
           <div className="alert-bar-text">
             <div className="alert-bar-title">Budget Overspend Alert</div>
             <div className="alert-bar-sub">
-              {opexOver && `OpEx at ${summary.opex.pct}% (₱${summary.opex.remaining.toLocaleString()} remaining)`}
+              {opexOver && `Software/Service budgets nearing limit — check Budget page`}
               {opexOver && capexOver && ' · '}
-              {capexOver && `CapEx at ${summary.capex.pct}% (₱${summary.capex.remaining.toLocaleString()} remaining)`}
+              {capexOver && `Hardware budget at ${summary?.categories?.hardware?.pct ?? 0}% — ₱${(summary?.categories?.hardware?.remaining ?? 0).toLocaleString()} remaining`}
             </div>
           </div>
         </div>
@@ -92,9 +92,9 @@ export default function Dashboard() {
           <div className="alert-bar-text">
             <div className="alert-bar-title">Department Budget Alert</div>
             <div className="alert-bar-sub">
-              {deptOpexOver && `Dept OpEx at ${deptBudget.opex.pct}%`}
+              {deptOpexOver && `Dept Software/Service budget over 80% utilized`}
               {deptOpexOver && deptCapexOver && ' · '}
-              {deptCapexOver && `Dept CapEx at ${deptBudget.capex.pct}%`}
+              {deptCapexOver && `Dept Hardware budget at ${deptBudget?.hardware?.pct ?? 0}% utilized`}
             </div>
           </div>
         </div>
@@ -111,8 +111,8 @@ export default function Dashboard() {
       )}
       {isStaff && deptBudget && (
         <div className="stat-grid" style={{ gridTemplateColumns:'repeat(2,1fr)' }}>
-          <Card title="Dept OpEx Remaining" value={fmt(deptBudget.opex.remaining)} subtitle={`${deptBudget.opex.pct}% of OpEx used`} icon={<BudgetIcon/>} accent="#8b5cf6" loading={!deptBudget}/>
-          <Card title="Dept CapEx Remaining" value={fmt(deptBudget.capex.remaining)} subtitle={`${deptBudget.capex.pct}% of CapEx used`} icon={<BankIcon/>} accent="#3b82f6" loading={!deptBudget}/>
+          <Card title="Dept Hardware Remaining" value={fmt(deptBudget?.hardware?.remaining ?? 0)} subtitle={`${deptBudget?.hardware?.pct ?? 0}% of Hardware budget used`} icon={<BudgetIcon/>} accent="#3b82f6" loading={!deptBudget}/>
+          <Card title="Dept SW License Remaining" value={fmt(deptBudget?.softwareLicense?.remaining ?? 0)} subtitle={`${deptBudget?.softwareLicense?.pct ?? 0}% of SW License used`} icon={<BankIcon/>} accent="#8b5cf6" loading={!deptBudget}/>
         </div>
       )}
 
@@ -145,10 +145,12 @@ export default function Dashboard() {
       {isStaff && deptBudget && (
         <div className="dual-budget-grid">
           {[
-            { key:'opex', label:'Department OpEx Budget', color:'#8b5cf6' },
-            { key:'capex', label:'Department CapEx Budget', color:'#3b82f6' },
+            { key:'hardware',        label:'Hardware Budget (CapEx)',          color:'#3b82f6' },
+            { key:'softwareLicense', label:'Software License Budget (OpEx)',   color:'#8b5cf6' },
+            { key:'service',         label:'Service Budget (OpEx)',            color:'#06b6d4' },
           ].map(b => {
-            const d = deptBudget[b.key]
+            const d = deptBudget?.[b.key]
+            if (!d) return null
             return (
               <div key={b.key} className="dual-budget-card">
                 <div className="dbc-header">
@@ -160,7 +162,7 @@ export default function Dashboard() {
                   <div style={{ textAlign:'right' }}><div className="dbc-sub">Remaining</div><div className="dbc-val">{fmt(d.remaining)}</div></div>
                 </div>
                 <div className="dbc-track"><div className="dbc-fill" style={{ width:`${Math.min(d.pct,100)}%`, background: d.pct>=80?'#ef4444':`linear-gradient(90deg,${b.color},${b.color}aa)` }}/></div>
-                <div className="dbc-meta">of {fmt(d.total)} allocation for {user?.department}</div>
+                <div className="dbc-meta">of {fmt(d.total)} allocation · {user?.department}</div>
               </div>
             )
           })}

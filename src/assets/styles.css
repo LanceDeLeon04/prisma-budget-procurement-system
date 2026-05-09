@@ -169,7 +169,7 @@ input,textarea,select{font-family:inherit}
 
 /* CARDS */
 .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:22px}
-@media(max-width:1200px){.stat-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:1200px){.stat-grid{grid-template-columns:repeat(2,1fr)}.dual-budget-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:640px){.stat-grid{grid-template-columns:1fr}}
 .stat-card{background:#fff;border:1.5px solid var(--n100);border-radius:18px;padding:20px 20px 18px;position:relative;overflow:hidden;transition:transform .22s cubic-bezier(.4,0,.2,1),box-shadow .22s;box-shadow:var(--s2);animation:cardReveal .4s ease both}
 .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--card-accent,var(--c));opacity:.75}
@@ -206,7 +206,7 @@ input,textarea,select{font-family:inherit}
 .badge-capex{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700;font-family:var(--fm);background:rgba(59,130,246,.1);color:var(--b);border:1px solid rgba(59,130,246,.2)}
 
 /* DUAL BUDGET BLOCK */
-.dual-budget-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px;animation:cardReveal .4s ease both .08s}
+.dual-budget-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:22px;animation:cardReveal .4s ease both .08s}
 .dual-budget-card{background:#fff;border:1.5px solid var(--n100);border-radius:18px;padding:20px 22px;box-shadow:var(--s2);position:relative;overflow:hidden;transition:all .2s}
 .dual-budget-card:hover{transform:translateY(-3px);box-shadow:var(--s4)}
 .dbc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}

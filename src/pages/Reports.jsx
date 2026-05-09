@@ -3,9 +3,6 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import PageLayout from '../components/PageLayout'
 import { reportsAPI } from '../services/api'
 import { useRole } from '../hooks/useRole'
-import * as XLSX_LIB from 'xlsx'
-import jsPDF from 'jspdf'
-import autoTable from 'jspdf-autotable'
 
 const fmt  = n => '₱' + Number(n ?? 0).toLocaleString()
 const fmtS = n => { if(n>=1000000) return '₱'+(n/1000000).toFixed(1)+'M'; if(n>=1000) return '₱'+(n/1000).toFixed(0)+'k'; return '₱'+n }
@@ -21,33 +18,56 @@ const AlertIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="no
 const InfoIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
 
 // ── EXPORT HELPERS ────────────────────────────────────────────────
-async function exportExcel(data, filename, sheetName='Report') {
-  const ws = XLSX_LIB.utils.json_to_sheet(data)
-  const wb = XLSX_LIB.utils.book_new()
-  XLSX_LIB.utils.book_append_sheet(wb, ws, sheetName)
-  XLSX_LIB.writeFile(wb, filename + '.xlsx')
+function exportExcel(data, filename) {
+  if (!data || data.length === 0) return
+  const headers = Object.keys(data[0])
+  const csvRows = [
+    headers.join(','),
+    ...data.map(row =>
+      headers.map(h => {
+        const val = String(row[h] ?? '').replace(/"/g, '""')
+        return val.includes(',') || val.includes('"') || val.includes('\n') ? `"${val}"` : val
+      }).join(',')
+    )
+  ]
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename + '.csv'; a.click()
+  URL.revokeObjectURL(url)
 }
 
-async function exportPDF(title, columns, rows, filename) {
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
-  doc.setFontSize(16)
-  doc.setFont('helvetica', 'bold')
-  doc.text('PRISMA — IT Budget & Cost Management', 40, 40)
-  doc.setFontSize(12)
-  doc.setFont('helvetica', 'normal')
-  doc.text(title, 40, 60)
-  doc.setFontSize(9)
-  doc.text('Generated: ' + new Date().toLocaleString('en-PH') + '  |  FY 2025', 40, 76)
-  autoTable(doc, {
-    startY: 90,
-    head: [columns],
-    body: rows,
-    styles: { fontSize: 9, cellPadding: 5 },
-    headStyles: { fillColor: [6, 182, 212], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [248, 250, 252] },
-    theme: 'grid',
-  })
-  doc.save(filename + '.pdf')
+function exportPDF(title, columns, rows, filename) {
+  const styles = `
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; color: #1e293b; }
+    .header { background: #0f172a; color: white; padding: 16px 20px; margin: -20px -20px 20px; }
+    .header h1 { font-size: 16px; margin: 0 0 4px; }
+    .header p  { font-size: 10px; color: #94a3b8; margin: 0; }
+    h2 { font-size: 13px; color: #0f172a; margin-bottom: 4px; }
+    .meta { font-size: 9px; color: #64748b; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    thead tr { background: #06b6d4; color: white; }
+    th { padding: 7px 10px; text-align: left; font-weight: 700; }
+    td { padding: 6px 10px; border-bottom: 1px solid #e2e8f0; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    .footer { margin-top: 20px; font-size: 8px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px; }
+    @media print { body { padding: 10px; } .header { margin: -10px -10px 15px; } }
+  `
+  const thead = `<tr>${columns.map(c => `<th>${c}</th>`).join('')}</tr>`
+  const tbody = rows.map(r => `<tr>${r.map(c => `<td>${c ?? '—'}</td>`).join('')}</tr>`).join('')
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${filename}</title><style>${styles}</style></head>
+  <body>
+    <div class="header"><h1>PRISMA — IT Budget & Cost Management Tracker</h1><p>ITIL Financial Management Aligned &nbsp;|&nbsp; FY 2025</p></div>
+    <h2>${title}</h2>
+    <p class="meta">Generated: ${new Date().toLocaleString('en-PH')}</p>
+    <table><thead>${thead}</thead><tbody>${tbody}</tbody></table>
+    <div class="footer">PRISMA IT Budget Tracker &nbsp;|&nbsp; Confidential &nbsp;|&nbsp; ${filename}</div>
+  </body></html>`
+  const win = window.open('', '_blank')
+  win.document.write(html)
+  win.document.close()
+  win.focus()
+  setTimeout(() => { win.print() }, 600)
 }
 
 export default function Reports() {
@@ -76,7 +96,7 @@ export default function Reports() {
   }, [])
 
   // Export handlers
-  const handleExportMonthlyExcel = async () => {
+  const handleExportMonthlyExcel = () => {
     setExporting('monthly-xl')
     const rows = monthly.filter(m=>m.actual>0).map(m => ({
       'Month': m.month,
@@ -88,22 +108,22 @@ export default function Reports() {
       'Variance (₱)': m.actual - m.planned,
       'Variance (%)': `${Math.round(((m.actual-m.planned)/m.planned)*100)}%`,
     }))
-    await exportExcel(rows, 'PRISMA_Monthly_Report_FY2025', 'Monthly Report')
+    exportExcel(rows, 'PRISMA_Monthly_Report_FY2025', 'Monthly Report')
     setExporting('')
   }
 
-  const handleExportMonthlyPDF = async () => {
+  const handleExportMonthlyPDF = () => {
     setExporting('monthly-pdf')
     const cols = ['Month','Planned','Actual','Hardware','Sw License','Service','Variance','Var %']
     const rows = monthly.filter(m=>m.actual>0).map(m => [
       m.month, fmt(m.planned), fmt(m.actual), fmt(m.hardware), fmt(m.softwareLicense), fmt(m.service),
       fmt(m.actual-m.planned), `${Math.round(((m.actual-m.planned)/m.planned)*100)}%`,
     ])
-    await exportPDF('Monthly IT Budget Report — FY 2025', cols, rows, 'PRISMA_Monthly_Report_FY2025')
+    exportPDF('Monthly IT Budget Report — FY 2025', cols, rows, 'PRISMA_Monthly_Report_FY2025')
     setExporting('')
   }
 
-  const handleExportQuarterlyExcel = async () => {
+  const handleExportQuarterlyExcel = () => {
     setExporting('qtly-xl')
     const rows = quarterly.map(q => ({
       'Quarter': q.quarter, 'Planned (₱)': q.planned, 'Actual (₱)': q.actual,
@@ -111,11 +131,11 @@ export default function Reports() {
       'Service (₱)': q.service, 'Variance (₱)': q.variance,
       'Variance (%)': q.actual>0?`${Math.round(q.variance/q.planned*100)}%`:'—',
     }))
-    await exportExcel(rows, 'PRISMA_Quarterly_Report_FY2025', 'Quarterly Report')
+    exportExcel(rows, 'PRISMA_Quarterly_Report_FY2025', 'Quarterly Report')
     setExporting('')
   }
 
-  const handleExportQuarterlyPDF = async () => {
+  const handleExportQuarterlyPDF = () => {
     setExporting('qtly-pdf')
     const cols = ['Quarter','Planned','Actual','Hardware','Sw License','Service','Variance','Var %']
     const rows = quarterly.map(q => [
@@ -124,22 +144,22 @@ export default function Reports() {
       q.service>0?fmt(q.service):'—', q.actual>0?fmt(q.variance):'—',
       q.actual>0?`${Math.round(q.variance/q.planned*100)}%`:'—',
     ])
-    await exportPDF('Quarterly IT Budget Report — FY 2025', cols, rows, 'PRISMA_Quarterly_Report_FY2025')
+    exportPDF('Quarterly IT Budget Report — FY 2025', cols, rows, 'PRISMA_Quarterly_Report_FY2025')
     setExporting('')
   }
 
-  const handleExportVariancePDF = async () => {
+  const handleExportVariancePDF = () => {
     setExporting('var-pdf')
     const cols = ['Category','Budgeted','Actual','Variance','Var %','Status']
     const rows = variance?.byCategory?.map(r=>[r.category,fmt(r.budgeted),fmt(r.actual),fmt(r.variance),`${r.variancePct}%`,r.status]) || []
-    await exportPDF('Variance Report — FY 2025 (Jan–May)', cols, rows, 'PRISMA_Variance_Report_FY2025')
+    exportPDF('Variance Report — FY 2025 (Jan–May)', cols, rows, 'PRISMA_Variance_Report_FY2025')
     setExporting('')
   }
 
-  const handleExportVarianceExcel = async () => {
+  const handleExportVarianceExcel = () => {
     setExporting('var-xl')
     const rows = variance?.byCategory?.map(r=>({'Category':r.category,'Budgeted (₱)':r.budgeted,'Actual (₱)':r.actual,'Variance (₱)':r.variance,'Variance (%)':r.variancePct+'%','Status':r.status})) || []
-    await exportExcel(rows, 'PRISMA_Variance_Report_FY2025', 'Variance Report')
+    exportExcel(rows, 'PRISMA_Variance_Report_FY2025', 'Variance Report')
     setExporting('')
   }
 
@@ -224,7 +244,7 @@ export default function Reports() {
       {activeTab==='monthly' && !isStaff && (
         <div style={{display:'flex',flexDirection:'column',gap:18}}>
           <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
-            <button className="btn btn-secondary btn-sm" onClick={handleExportMonthlyExcel} disabled={!!exporting} style={{gap:7}}><DownloadIcon/>{exporting==='monthly-xl'?'Exporting...':'Export Excel'}</button>
+            <button className="btn btn-secondary btn-sm" onClick={handleExportMonthlyExcel} disabled={!!exporting} style={{gap:7}}><DownloadIcon/>{exporting==='monthly-xl'?'Exporting...':'Export CSV'}</button>
             <button className="btn btn-primary btn-sm" onClick={handleExportMonthlyPDF} disabled={!!exporting} style={{gap:7}}><DownloadIcon/>{exporting==='monthly-pdf'?'Exporting...':'Export PDF'}</button>
           </div>
           <div className="glass-card" style={{padding:24}}>
@@ -271,7 +291,7 @@ export default function Reports() {
       {activeTab==='quarterly' && !isStaff && (
         <div style={{display:'flex',flexDirection:'column',gap:18}}>
           <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
-            <button className="btn btn-secondary btn-sm" onClick={handleExportQuarterlyExcel} disabled={!!exporting} style={{gap:7}}><DownloadIcon/>{exporting==='qtly-xl'?'Exporting...':'Export Excel'}</button>
+            <button className="btn btn-secondary btn-sm" onClick={handleExportQuarterlyExcel} disabled={!!exporting} style={{gap:7}}><DownloadIcon/>{exporting==='qtly-xl'?'Exporting...':'Export CSV'}</button>
             <button className="btn btn-primary btn-sm" onClick={handleExportQuarterlyPDF} disabled={!!exporting} style={{gap:7}}><DownloadIcon/>{exporting==='qtly-pdf'?'Exporting...':'Export PDF'}</button>
           </div>
           <div className="glass-card" style={{padding:24}}>
@@ -322,7 +342,7 @@ export default function Reports() {
               Period: {variance.period} · Planned: {fmt(variance.totalBudgeted)} · Actual: {fmt(variance.totalActual)} · Variance: <span style={{color:variance.totalVariance>0?'#ef4444':'#10b981',fontWeight:800}}>{variance.totalVariancePct}%</span>
             </div>
             <div style={{display:'flex',gap:10}}>
-              <button className="btn btn-secondary btn-sm" onClick={handleExportVarianceExcel} disabled={!!exporting} style={{gap:7}}><DownloadIcon/>{exporting==='var-xl'?'Exporting...':'Export Excel'}</button>
+              <button className="btn btn-secondary btn-sm" onClick={handleExportVarianceExcel} disabled={!!exporting} style={{gap:7}}><DownloadIcon/>{exporting==='var-xl'?'Exporting...':'Export CSV'}</button>
               <button className="btn btn-primary btn-sm" onClick={handleExportVariancePDF} disabled={!!exporting} style={{gap:7}}><DownloadIcon/>{exporting==='var-pdf'?'Exporting...':'Export PDF'}</button>
             </div>
           </div>

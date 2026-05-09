@@ -323,7 +323,7 @@ export const reportsAPI = {
   getSummary: async () => { await delay(380); return computeBudgetSummary() },
   getMonthlyData: async () => { await delay(500); return DB.monthlyData },
   getQuarterlyData: async () => { await delay(450); return DB.quarterlyData },
-  getVarianceReport: async () => { await delay(500); return budgetAPI.getVarianceReport() },
+  getVarianceReport: async () => { await delay(500); return await budgetAPI.getVarianceReport() },
   getExpensesByCategory: async () => {
     await delay(400)
     const s = computeBudgetSummary()
@@ -331,6 +331,17 @@ export const reportsAPI = {
       { name:'Hardware',         value: s.categories.hardware.spent,        budget: s.categories.hardware.allocated,        pct: s.categories.hardware.pct,        color:'#3b82f6' },
       { name:'Software License', value: s.categories.softwareLicense.spent, budget: s.categories.softwareLicense.allocated, pct: s.categories.softwareLicense.pct, color:'#8b5cf6' },
       { name:'Service',          value: s.categories.service.spent,          budget: s.categories.service.allocated,          pct: s.categories.service.pct,          color:'#06b6d4' },
+    ]
+  },
+  getFiles: async () => {
+    await delay(300)
+    return [
+      { id:'R001', title:'Monthly Budget Utilization Report',      type:'Budget',      period:'April 2025', size:'1.2 MB', generated:'2025-05-01', format:'PDF' },
+      { id:'R002', title:'Hardware vs SW License vs Service Breakdown', type:'Finance', period:'Q1 2025',   size:'2.4 MB', generated:'2025-04-15', format:'CSV' },
+      { id:'R003', title:'Procurement Activity Summary',           type:'Procurement', period:'Q1 2025',    size:'3.4 MB', generated:'2025-04-01', format:'CSV' },
+      { id:'R004', title:'Vendor Performance Report',              type:'Procurement', period:'Q1 2025',    size:'980 KB', generated:'2025-04-10', format:'PDF' },
+      { id:'R005', title:'Annual IT Audit Trail',                  type:'Compliance',  period:'2024',       size:'8.7 MB', generated:'2025-01-15', format:'PDF' },
+      { id:'R006', title:'Variance Analysis Report FY 2025',       type:'Finance',     period:'FY 2025',    size:'1.8 MB', generated:'2025-05-03', format:'PDF' },
     ]
   },
 }
