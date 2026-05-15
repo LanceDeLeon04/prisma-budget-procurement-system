@@ -2,8 +2,23 @@
 // PRISMA – IT Budget & Cost Management Tracker
 // ITIL Financial Management Aligned
 // Categories: Hardware | Software License | Service
+//
+// REAL-TIME SYNC ARCHITECTURE:
+//   All mutations write through to the shared DB object.
+//   Components that need live updates should poll via
+//   setInterval or subscribe via the eventBus exported below.
+//   In production, replace eventBus with a WebSocket / SSE channel.
 // ================================================================
 const delay = ms => new Promise(r => setTimeout(r, ms))
+
+// ── SHARED EVENT BUS ─────────────────────────────────────────────
+// Lightweight pub/sub used by Shop.jsx's shopStore and any other
+// component that needs to react to cross-role mutations in real time.
+const _listeners = new Set()
+export const eventBus = {
+  emit:        (event, payload) => _listeners.forEach(fn => fn(event, payload)),
+  subscribe:   fn => { _listeners.add(fn); return () => _listeners.delete(fn) },
+}
 
 // ── MOCK DATABASE ────────────────────────────────────────────────
 const DB = {
@@ -81,6 +96,18 @@ const DB = {
     { quarter:'Q4 2025', planned:1150000, actual:0,       hardware:0,      softwareLicense:0,      service:0,      variance:0       },
   ],
 
+  // Purchase Requests — canonical source of truth
+  // (Shop.jsx maintains its own in-memory layer on top of this for instant UI;
+  //  on save/approve the mutation is written back here and eventBus fires)
+  purchaseRequests: [
+    { id:'REQ-2025-0214', title:'Laptops for New Admin Hires', requestedBy:'Maria Santos', requestorRole:'regular_staff', department:'Administration', date:'2025-05-02', category:'hardware', lineItem:'LI-H01', lineItemName:'Endpoint Devices', items:[{productId:'P001',name:'Dell Latitude 5540 Laptop',qty:3,unitPrice:35000,sku:'DL-LAT-5540',vendor:'Dell Philippines',category:'hardware'}], total:105000, status:'pending',    priority:'high',   note:'3 new hires starting June 1.', feedback:'', approvedBy:'' },
+    { id:'REQ-2025-0213', title:'Network Switch Replacement',   requestedBy:'Juan Cruz',    requestorRole:'it_staff',      department:'IT',             date:'2025-05-01', category:'hardware', lineItem:'LI-H02', lineItemName:'Network Equipment',  items:[{productId:'P006',name:'Cisco Catalyst 2960-X',qty:2,unitPrice:85000,sku:'CS-CAT-2960X',vendor:'Cisco Philippines',category:'hardware'}],    total:170000, status:'approved',   priority:'high',   note:'Current switches failing.', feedback:'Approved. PO issued.', approvedBy:'Admin' },
+    { id:'REQ-2025-0212', title:'Microsoft 365 Renewal',        requestedBy:'Ana Reyes',    requestorRole:'regular_staff', department:'Finance',        date:'2025-04-30', category:'softwareLicense', lineItem:'LI-S01', lineItemName:'Productivity & SaaS', items:[{productId:'P013',name:'Microsoft 365 Business Premium',qty:10,unitPrice:4750,sku:'MS-365-BP',vendor:'Microsoft PH',category:'softwareLicense'}], total:47500, status:'approved', priority:'medium', note:'Licenses expire May 15.', feedback:'Approved.', approvedBy:'Juan Cruz' },
+    { id:'REQ-2025-0211', title:'Antivirus Renewal – Finance',   requestedBy:'Ana Reyes',    requestorRole:'regular_staff', department:'Finance',        date:'2025-04-28', category:'softwareLicense', lineItem:'LI-S02', lineItemName:'Security Software',   items:[{productId:'P016',name:'Kaspersky Endpoint Security',qty:20,unitPrice:1340,sku:'KS-ES-1YR',vendor:'Kaspersky PH',category:'softwareLicense'}],  total:26800, status:'for_review',priority:'high',   note:'Licenses expire May 1.', feedback:'', approvedBy:'' },
+    { id:'REQ-2025-0210', title:'HR Peripherals Upgrade',        requestedBy:'Lisa Bautista',requestorRole:'regular_staff', department:'HR',             date:'2025-04-25', category:'hardware', lineItem:'LI-H03', lineItemName:'Peripherals', items:[{productId:'P008',name:'Logitech MX Keys S',qty:5,unitPrice:5200,sku:'LG-MXK-S',vendor:'Logitech PH',category:'hardware'},{productId:'P009',name:'Logitech MX Master 3S',qty:5,unitPrice:4800,sku:'LG-MXM-3S',vendor:'Logitech PH',category:'hardware'}], total:50000, status:'rejected', priority:'low', note:'Upgrade request.', feedback:'Rejected – defer to Q3.', approvedBy:'Juan Cruz' },
+    { id:'REQ-2025-0209', title:'Server Storage Expansion',      requestedBy:'Juan Cruz',    requestorRole:'it_staff',      department:'IT',             date:'2025-04-22', category:'hardware', lineItem:'LI-H04', lineItemName:'Servers & Storage',   items:[{productId:'P010',name:'Dell PowerEdge R750',qty:1,unitPrice:350000,sku:'DL-PE-R750',vendor:'Dell Philippines',category:'hardware'}],         total:350000, status:'approved',  priority:'high',   note:'Server at 90% capacity.', feedback:'Approved.', approvedBy:'Admin' },
+  ],
+
   // Users
   users: [
     { id:1, username:'admin',   password:'admin',   name:'System Administrator', role:'admin',         department:'IT & Operations',       email:'admin@prisma.gov.ph',   avatar:'SA' },
@@ -91,23 +118,28 @@ const DB = {
 
 // ── COMPUTED VALUES ───────────────────────────────────────────────
 function computeBudgetSummary() {
-  const totalSpent = DB.expenses.filter(e => e.status === 'approved').reduce((a, e) => a + e.amount, 0)
-  const hwSpent  = DB.expenses.filter(e => e.status==='approved' && e.category==='hardware').reduce((a,e)=>a+e.amount,0)
-  const swSpent  = DB.expenses.filter(e => e.status==='approved' && e.category==='softwareLicense').reduce((a,e)=>a+e.amount,0)
-  const svcSpent = DB.expenses.filter(e => e.status==='approved' && e.category==='service').reduce((a,e)=>a+e.amount,0)
+  const approvedExpenses = DB.expenses.filter(e => e.status === 'approved')
+  const totalSpent    = approvedExpenses.reduce((a, e) => a + e.amount, 0)
+  const hwSpent       = approvedExpenses.filter(e => e.category === 'hardware').reduce((a,e) => a+e.amount, 0)
+  const swSpent       = approvedExpenses.filter(e => e.category === 'softwareLicense').reduce((a,e) => a+e.amount, 0)
+  const svcSpent      = approvedExpenses.filter(e => e.category === 'service').reduce((a,e) => a+e.amount, 0)
+  const hw  = DB.budgetAllocations.hardware
+  const sw  = DB.budgetAllocations.softwareLicense
+  const svc = DB.budgetAllocations.service
+  const total = hw.allocated + sw.allocated + svc.allocated
   return {
-    totalBudget:    DB.budgetAllocations.total,
+    totalBudget:    total,
     totalSpent,
-    totalRemaining: DB.budgetAllocations.total - totalSpent,
-    totalVariance:  totalSpent - DB.budgetAllocations.total * 0.37,
+    totalRemaining: total - totalSpent,
+    totalVariance:  totalSpent - total * 0.37,
     fiscalYear:     DB.fiscalYear,
     categories: {
-      hardware:        { ...DB.budgetAllocations.hardware,        spent: hwSpent,  remaining: DB.budgetAllocations.hardware.allocated - hwSpent,        pct: Math.round(hwSpent/DB.budgetAllocations.hardware.allocated*100)        },
-      softwareLicense: { ...DB.budgetAllocations.softwareLicense, spent: swSpent,  remaining: DB.budgetAllocations.softwareLicense.allocated - swSpent,  pct: Math.round(swSpent/DB.budgetAllocations.softwareLicense.allocated*100)  },
-      service:         { ...DB.budgetAllocations.service,         spent: svcSpent, remaining: DB.budgetAllocations.service.allocated - svcSpent,         pct: Math.round(svcSpent/DB.budgetAllocations.service.allocated*100)         },
+      hardware:        { ...hw,  spent: hwSpent,  remaining: hw.allocated  - hwSpent,  pct: Math.min(Math.round(hwSpent  / hw.allocated  * 100), 999) },
+      softwareLicense: { ...sw,  spent: swSpent,  remaining: sw.allocated  - swSpent,  pct: Math.min(Math.round(swSpent  / sw.allocated  * 100), 999) },
+      service:         { ...svc, spent: svcSpent, remaining: svc.allocated - svcSpent, pct: Math.min(Math.round(svcSpent / svc.allocated * 100), 999) },
     },
-    pendingExpenses: DB.expenses.filter(e => e.status !== 'approved').length,
-    approvedThisMonth: DB.expenses.filter(e => e.status==='approved' && e.date.startsWith('2025-05')).length,
+    pendingExpenses:    DB.expenses.filter(e => e.status !== 'approved' && e.status !== 'rejected').length,
+    approvedThisMonth:  DB.expenses.filter(e => e.status === 'approved' && e.date.startsWith('2025-05')).length,
   }
 }
 
@@ -115,8 +147,8 @@ function computeBudgetSummary() {
 export const authAPI = {
   login: async (username, password) => {
     await delay(1100)
-    const u = DB.users.find(u => u.username===username && u.password===password)
-    if (u) { const {password:_,...safe}=u; return {...safe,token:`jwt-${safe.role}-2025`} }
+    const u = DB.users.find(u => u.username === username && u.password === password)
+    if (u) { const { password:_, ...safe } = u; return { ...safe, token: `jwt-${safe.role}-2025` } }
     throw new Error('Invalid username or password')
   },
 }
@@ -127,14 +159,20 @@ export const budgetAPI = {
 
   getLineItems: async () => {
     await delay(450)
-    return DB.lineItems.map(li => ({
-      ...li,
-      spent: DB.expenses.filter(e=>e.lineItem===li.id && e.status==='approved').reduce((a,e)=>a+e.amount,0) || li.spent,
-      utilization: Math.round(li.spent / li.allocated * 100),
-      remaining: li.allocated - li.spent,
-      isOverBudget: li.spent > li.allocated,
-      warningLevel: li.spent/li.allocated >= 1 ? 'critical' : li.spent/li.allocated >= 0.8 ? 'warning' : 'ok',
-    }))
+    return DB.lineItems.map(li => {
+      // Recompute spent from approved expenses each call — keeps in sync with new expenses
+      const liveSpent = DB.expenses
+        .filter(e => e.lineItem === li.id && e.status === 'approved')
+        .reduce((a, e) => a + e.amount, 0)
+      const spent = liveSpent || li.spent
+      return {
+        ...li, spent,
+        utilization: Math.min(Math.round(spent / li.allocated * 100), 999),
+        remaining:   li.allocated - spent,
+        isOverBudget: spent > li.allocated,
+        warningLevel: spent / li.allocated >= 1 ? 'critical' : spent / li.allocated >= 0.8 ? 'warning' : 'ok',
+      }
+    })
   },
 
   getDeptBudget: async (dept) => {
@@ -149,18 +187,17 @@ export const budgetAPI = {
     }
     const d = depts[dept] || depts['Administration']
     return {
-      hardware:        { ...d.hardware,        remaining: d.hardware.total-d.hardware.spent,               pct: Math.round(d.hardware.spent/d.hardware.total*100)               },
-      softwareLicense: { ...d.softwareLicense, remaining: d.softwareLicense.total-d.softwareLicense.spent, pct: Math.round(d.softwareLicense.spent/d.softwareLicense.total*100) },
-      service:         { ...d.service,         remaining: d.service.total-d.service.spent,                 pct: Math.round(d.service.spent/d.service.total*100)                 },
+      hardware:        { ...d.hardware,        remaining: d.hardware.total        - d.hardware.spent,        pct: Math.round(d.hardware.spent        / d.hardware.total        * 100) },
+      softwareLicense: { ...d.softwareLicense, remaining: d.softwareLicense.total - d.softwareLicense.spent, pct: Math.round(d.softwareLicense.spent / d.softwareLicense.total * 100) },
+      service:         { ...d.service,         remaining: d.service.total         - d.service.spent,         pct: Math.round(d.service.spent         / d.service.total         * 100) },
     }
   },
 
-  getMonthlyData: async () => { await delay(500); return DB.monthlyData },
-  getQuarterlyData: async () => { await delay(450); return DB.quarterlyData },
+  getMonthlyData:    async () => { await delay(500); return DB.monthlyData },
+  getQuarterlyData:  async () => { await delay(450); return DB.quarterlyData },
 
   getVarianceReport: async () => {
     await delay(500)
-    const summary = computeBudgetSummary()
     return {
       period: 'January – May 2025',
       totalBudgeted: 3250000,
@@ -168,16 +205,14 @@ export const budgetAPI = {
       totalVariance: -1518500,
       variancePct:   -46.7,
       byCategory: [
-        { category:'Hardware',         budgeted:1301000, actual:1301000, variance:0,       variancePct:0.0,   status:'on_track'  },
-        { category:'Software License', budgeted:603500,  actual:390000,  variance:-213500,  variancePct:-35.4, status:'under'     },
-        { category:'Service',          budgeted:540000,  actual:325000,  variance:-215000,  variancePct:-39.8, status:'under'     },
+        { category:'Hardware',         budgeted:1301000, actual:1301000, variance:0,       variancePct:0.0,   status:'on_track' },
+        { category:'Software License', budgeted:603500,  actual:390000,  variance:-213500, variancePct:-35.4, status:'under'    },
+        { category:'Service',          budgeted:540000,  actual:325000,  variance:-215000, variancePct:-39.8, status:'under'    },
       ],
-      byMonth: DB.monthlyData.slice(0,5).map(m => ({
-        month: m.month,
-        planned: m.planned,
-        actual: m.actual,
+      byMonth: DB.monthlyData.slice(0, 5).map(m => ({
+        month: m.month, planned: m.planned, actual: m.actual,
         variance: m.actual - m.planned,
-        variancePct: m.planned > 0 ? Math.round(((m.actual-m.planned)/m.planned)*100) : 0,
+        variancePct: m.planned > 0 ? Math.round(((m.actual - m.planned) / m.planned) * 100) : 0,
       })),
       alerts: [
         { type:'warning', message:'Q2 hardware spend exceeded plan by ₱76,000 due to emergency server procurement' },
@@ -187,18 +222,27 @@ export const budgetAPI = {
     }
   },
 
-  // Admin: set budget allocation
   setBudgetAllocation: async (data) => {
     await delay(600)
-    Object.assign(DB.budgetAllocations, data)
+    if (data.hardware)        Object.assign(DB.budgetAllocations.hardware, data.hardware)
+    if (data.softwareLicense) Object.assign(DB.budgetAllocations.softwareLicense, data.softwareLicense)
+    if (data.service)         Object.assign(DB.budgetAllocations.service, data.service)
+    // Recompute total
+    DB.budgetAllocations.total =
+      DB.budgetAllocations.hardware.allocated +
+      DB.budgetAllocations.softwareLicense.allocated +
+      DB.budgetAllocations.service.allocated
+    eventBus.emit('budget:updated', computeBudgetSummary())
     return { success: true }
   },
 
   addLineItem: async (item) => {
     await delay(400)
-    const id = `LI-${item.category==='hardware'?'H':item.category==='softwareLicense'?'S':'V'}${String(DB.lineItems.length+1).padStart(2,'0')}`
-    const newLI = { id, ...item, spent:0, remaining:item.allocated, utilization:0, isOverBudget:false, warningLevel:'ok', color:'#06b6d4' }
+    const prefix = item.category === 'hardware' ? 'H' : item.category === 'softwareLicense' ? 'S' : 'V'
+    const id = `LI-${prefix}${String(DB.lineItems.filter(l => l.category === item.category).length + 1).padStart(2, '0')}`
+    const newLI = { id, ...item, spent: 0, remaining: item.allocated, utilization: 0, isOverBudget: false, warningLevel: 'ok', color: '#06b6d4' }
     DB.lineItems.push(newLI)
+    eventBus.emit('lineItems:updated', DB.lineItems)
     return newLI
   },
 }
@@ -209,21 +253,43 @@ export const expenseAPI = {
 
   getByCategory: async (cat) => {
     await delay(350)
-    return cat === 'all' ? DB.expenses : DB.expenses.filter(e => e.category === cat)
+    return cat === 'all' ? [...DB.expenses] : DB.expenses.filter(e => e.category === cat)
   },
 
   addExpense: async (expense) => {
     await delay(500)
-    const id = `EXP-2025-${String(DB.expenses.length+1).padStart(3,'0')}`
-    const newExp = { id, ...expense, status:'pending', approvedBy:'', invoiceNo:`INV-${Date.now()}`, paymentStatus:'unpaid' }
+    const id = `EXP-2025-${String(DB.expenses.length + 1).padStart(3, '0')}`
+    const newExp = {
+      id, ...expense,
+      status: expense.status ?? 'pending',
+      approvedBy: expense.approvedBy ?? '',
+      invoiceNo: expense.invoiceNo ?? `INV-${Date.now()}`,
+      paymentStatus: expense.paymentStatus ?? 'unpaid',
+    }
     DB.expenses.push(newExp)
+    // Update lineItem spent totals live
+    const li = DB.lineItems.find(l => l.id === newExp.lineItem)
+    if (li && newExp.status === 'approved') li.spent += newExp.amount
+    eventBus.emit('expenses:added', newExp)
+    eventBus.emit('budget:updated', computeBudgetSummary())
     return newExp
   },
 
-  updateStatus: async (id, status, approvedBy='') => {
+  updateStatus: async (id, status, approvedBy = '') => {
     await delay(400)
     const exp = DB.expenses.find(e => e.id === id)
-    if (exp) { exp.status = status; exp.approvedBy = approvedBy }
+    if (!exp) throw new Error(`Expense ${id} not found`)
+    const wasApproved = exp.status === 'approved'
+    exp.status     = status
+    exp.approvedBy = approvedBy
+    // Update lineItem spent live: add if newly approved, subtract if un-approved
+    const li = DB.lineItems.find(l => l.id === exp.lineItem)
+    if (li) {
+      if (status === 'approved' && !wasApproved) li.spent += exp.amount
+      if (status !== 'approved' && wasApproved) li.spent = Math.max(0, li.spent - exp.amount)
+    }
+    eventBus.emit('expenses:updated', exp)
+    eventBus.emit('budget:updated', computeBudgetSummary())
     return exp
   },
 }
@@ -234,69 +300,123 @@ export const shopAPI = {
     await delay(600)
     return [
       // Hardware - Laptops
-      { id:'P001', name:'Dell Latitude 5540 Laptop',       category:'hardware', subcategory:'Laptops',     price:35000,  stock:8,   unit:'unit',        sku:'DL-LAT-5540',   vendor:'Dell Philippines',   specs:'Intel i5-13th Gen, 16GB RAM, 512GB SSD',     lineItem:'LI-H01' },
-      { id:'P002', name:'Lenovo ThinkPad E15 Gen 4',       category:'hardware', subcategory:'Laptops',     price:32000,  stock:5,   unit:'unit',        sku:'LN-TP-E15G4',   vendor:'Lenovo PH',          specs:'Intel i5-12th Gen, 16GB RAM, 512GB SSD',     lineItem:'LI-H01' },
-      { id:'P003', name:'HP EliteBook 840 G10',            category:'hardware', subcategory:'Laptops',     price:42000,  stock:4,   unit:'unit',        sku:'HP-EB-840G10',  vendor:'HP Philippines',     specs:'Intel i7-13th Gen, 32GB RAM, 1TB SSD',       lineItem:'LI-H01' },
-      { id:'P004', name:'Dell UltraSharp 27" 4K Monitor',  category:'hardware', subcategory:'Monitors',    price:22000,  stock:10,  unit:'unit',        sku:'DL-US-U2722D',  vendor:'Dell Philippines',   specs:'27in IPS 4K, USB-C 90W, 60Hz',              lineItem:'LI-H01' },
-      { id:'P005', name:'HP EliteDesk 800 G9 SFF',         category:'hardware', subcategory:'Desktops',    price:28000,  stock:3,   unit:'unit',        sku:'HP-ED-800G9',   vendor:'HP Philippines',     specs:'Intel i7-12th Gen, 16GB RAM, 1TB SSD',       lineItem:'LI-H01' },
-      { id:'P006', name:'Cisco Catalyst 2960-X 24-Port',   category:'hardware', subcategory:'Network',     price:85000,  stock:4,   unit:'unit',        sku:'CS-CAT-2960X',  vendor:'Cisco Philippines',  specs:'24x GbE PoE+, 4x SFP+, Layer 2',            lineItem:'LI-H02' },
-      { id:'P007', name:'Ubiquiti UniFi AP-AC Pro',        category:'hardware', subcategory:'Network',     price:8500,   stock:12,  unit:'unit',        sku:'UB-UAP-ACPRO',  vendor:'IT Solutions PH',    specs:'802.11ac Dual Band, Indoor',                 lineItem:'LI-H02' },
-      { id:'P008', name:'Logitech MX Keys S Keyboard',     category:'hardware', subcategory:'Peripherals', price:5200,   stock:12,  unit:'unit',        sku:'LG-MXK-S',      vendor:'Logitech PH',        specs:'Wireless Bluetooth, Multi-device, Backlit',   lineItem:'LI-H03' },
-      { id:'P009', name:'Logitech MX Master 3S Mouse',     category:'hardware', subcategory:'Peripherals', price:4800,   stock:14,  unit:'unit',        sku:'LG-MXM-3S',     vendor:'Logitech PH',        specs:'Wireless, 8000 DPI, USB-C Charge',            lineItem:'LI-H03' },
-      { id:'P010', name:'Dell PowerEdge R750 Server',      category:'hardware', subcategory:'Servers',     price:350000, stock:2,   unit:'unit',        sku:'DL-PE-R750',    vendor:'Dell Philippines',   specs:'Dual Xeon, 64GB RAM, 4x2TB SSD RAID',        lineItem:'LI-H04' },
-      { id:'P011', name:'APC Smart-UPS 1500VA',            category:'hardware', subcategory:'Power',       price:18500,  stock:5,   unit:'unit',        sku:'APC-SMT1500',   vendor:'APC Schneider',      specs:'1500VA/980W, LCD, USB, 8 Outlets',            lineItem:'LI-H04' },
-      { id:'P012', name:'HP LaserJet Pro M404dn',          category:'hardware', subcategory:'Printers',    price:22000,  stock:4,   unit:'unit',        sku:'HP-LJ-M404DN',  vendor:'HP Philippines',     specs:'Duplex, LAN, 38ppm, PCL6',                   lineItem:'LI-H05' },
+      { id:'P001', name:'Dell Latitude 5540 Laptop',       category:'hardware', subcategory:'Laptops',     price:35000,  stock:8,   unit:'unit',        sku:'DL-LAT-5540',   vendor:'Dell Philippines',    specs:'Intel i5-13th Gen, 16GB RAM, 512GB SSD',      lineItem:'LI-H01' },
+      { id:'P002', name:'Lenovo ThinkPad E15 Gen 4',       category:'hardware', subcategory:'Laptops',     price:32000,  stock:5,   unit:'unit',        sku:'LN-TP-E15G4',   vendor:'Lenovo PH',           specs:'Intel i5-12th Gen, 16GB RAM, 512GB SSD',      lineItem:'LI-H01' },
+      { id:'P003', name:'HP EliteBook 840 G10',            category:'hardware', subcategory:'Laptops',     price:42000,  stock:4,   unit:'unit',        sku:'HP-EB-840G10',  vendor:'HP Philippines',      specs:'Intel i7-13th Gen, 32GB RAM, 1TB SSD',        lineItem:'LI-H01' },
+      { id:'P004', name:'Dell UltraSharp 27" 4K Monitor',  category:'hardware', subcategory:'Monitors',    price:22000,  stock:10,  unit:'unit',        sku:'DL-US-U2722D',  vendor:'Dell Philippines',    specs:'27in IPS 4K, USB-C 90W, 60Hz',               lineItem:'LI-H01' },
+      { id:'P005', name:'HP EliteDesk 800 G9 SFF',         category:'hardware', subcategory:'Desktops',    price:28000,  stock:3,   unit:'unit',        sku:'HP-ED-800G9',   vendor:'HP Philippines',      specs:'Intel i7-12th Gen, 16GB RAM, 1TB SSD',        lineItem:'LI-H01' },
+      { id:'P006', name:'Cisco Catalyst 2960-X 24-Port',   category:'hardware', subcategory:'Network',     price:85000,  stock:4,   unit:'unit',        sku:'CS-CAT-2960X',  vendor:'Cisco Philippines',   specs:'24x GbE PoE+, 4x SFP+, Layer 2',             lineItem:'LI-H02' },
+      { id:'P007', name:'Ubiquiti UniFi AP-AC Pro',        category:'hardware', subcategory:'Network',     price:8500,   stock:12,  unit:'unit',        sku:'UB-UAP-ACPRO',  vendor:'IT Solutions PH',     specs:'802.11ac Dual Band, Indoor',                  lineItem:'LI-H02' },
+      { id:'P008', name:'Logitech MX Keys S Keyboard',     category:'hardware', subcategory:'Peripherals', price:5200,   stock:12,  unit:'unit',        sku:'LG-MXK-S',      vendor:'Logitech PH',         specs:'Wireless Bluetooth, Multi-device, Backlit',    lineItem:'LI-H03' },
+      { id:'P009', name:'Logitech MX Master 3S Mouse',     category:'hardware', subcategory:'Peripherals', price:4800,   stock:14,  unit:'unit',        sku:'LG-MXM-3S',     vendor:'Logitech PH',         specs:'Wireless, 8000 DPI, USB-C Charge',             lineItem:'LI-H03' },
+      { id:'P010', name:'Dell PowerEdge R750 Server',      category:'hardware', subcategory:'Servers',     price:350000, stock:2,   unit:'unit',        sku:'DL-PE-R750',    vendor:'Dell Philippines',    specs:'Dual Xeon, 64GB RAM, 4x2TB SSD RAID',         lineItem:'LI-H04' },
+      { id:'P011', name:'APC Smart-UPS 1500VA',            category:'hardware', subcategory:'Power',       price:18500,  stock:5,   unit:'unit',        sku:'APC-SMT1500',   vendor:'APC Schneider',       specs:'1500VA/980W, LCD, USB, 8 Outlets',             lineItem:'LI-H04' },
+      { id:'P012', name:'HP LaserJet Pro M404dn',          category:'hardware', subcategory:'Printers',    price:22000,  stock:4,   unit:'unit',        sku:'HP-LJ-M404DN',  vendor:'HP Philippines',      specs:'Duplex, LAN, 38ppm, PCL6',                    lineItem:'LI-H05' },
       // Software License
-      { id:'P013', name:'Microsoft 365 Business Premium',  category:'softwareLicense', subcategory:'Productivity', price:4750,  stock:999, unit:'license/yr',  sku:'MS-365-BP',    vendor:'Microsoft PH',       specs:'Word, Excel, Teams, 1TB OneDrive, 1yr',      lineItem:'LI-S01' },
-      { id:'P014', name:'Adobe Creative Cloud All Apps',   category:'softwareLicense', subcategory:'Design',       price:9500,  stock:999, unit:'license/yr',  sku:'ADO-CC-ALL',   vendor:'Adobe Systems',      specs:'Photoshop, Illustrator, Premiere, 1yr',      lineItem:'LI-S01' },
-      { id:'P015', name:'Google Workspace Business Plus',  category:'softwareLicense', subcategory:'Productivity', price:3200,  stock:999, unit:'user/yr',     sku:'GWS-BIZ-PLUS', vendor:'Google PH',          specs:'Gmail, Drive 5TB, Meet, 1yr',                lineItem:'LI-S01' },
-      { id:'P016', name:'Kaspersky Endpoint Security',     category:'softwareLicense', subcategory:'Security',     price:1340,  stock:999, unit:'license/yr',  sku:'KS-ES-1YR',    vendor:'Kaspersky PH',       specs:'Endpoint Protection, 1 Device 1yr',          lineItem:'LI-S02' },
-      { id:'P017', name:'Bitdefender GravityZone Biz',     category:'softwareLicense', subcategory:'Security',     price:1580,  stock:999, unit:'license/yr',  sku:'BD-GZ-BIZ',    vendor:'Bitdefender PH',     specs:'Next-Gen AV, EDR, 1 Endpoint 1yr',           lineItem:'LI-S02' },
-      { id:'P018', name:'ManageEngine IT Help Desk Plus',  category:'softwareLicense', subcategory:'ITSM',         price:85000, stock:999, unit:'license/yr',  sku:'ME-ITHDP-1Y',  vendor:'ManageEngine PH',    specs:'ITSM Platform, 5 Techs, 1yr',                lineItem:'LI-S03' },
-      { id:'P019', name:'AutoCAD LT Subscription',         category:'softwareLicense', subcategory:'CAD',          price:18000, stock:999, unit:'license/yr',  sku:'ADSK-ACAD-LT', vendor:'Autodesk PH',        specs:'2D Drafting, 1 User 1yr',                    lineItem:'LI-S04' },
+      { id:'P013', name:'Microsoft 365 Business Premium',  category:'softwareLicense', subcategory:'Productivity', price:4750,  stock:999, unit:'license/yr',  sku:'MS-365-BP',    vendor:'Microsoft PH',       specs:'Word, Excel, Teams, 1TB OneDrive, 1yr',       lineItem:'LI-S01' },
+      { id:'P014', name:'Adobe Creative Cloud All Apps',   category:'softwareLicense', subcategory:'Design',       price:9500,  stock:999, unit:'license/yr',  sku:'ADO-CC-ALL',   vendor:'Adobe Systems',      specs:'Photoshop, Illustrator, Premiere, 1yr',       lineItem:'LI-S01' },
+      { id:'P015', name:'Google Workspace Business Plus',  category:'softwareLicense', subcategory:'Productivity', price:3200,  stock:999, unit:'user/yr',     sku:'GWS-BIZ-PLUS', vendor:'Google PH',          specs:'Gmail, Drive 5TB, Meet, 1yr',                 lineItem:'LI-S01' },
+      { id:'P016', name:'Kaspersky Endpoint Security',     category:'softwareLicense', subcategory:'Security',     price:1340,  stock:999, unit:'license/yr',  sku:'KS-ES-1YR',    vendor:'Kaspersky PH',       specs:'Endpoint Protection, 1 Device 1yr',           lineItem:'LI-S02' },
+      { id:'P017', name:'Bitdefender GravityZone Biz',     category:'softwareLicense', subcategory:'Security',     price:1580,  stock:999, unit:'license/yr',  sku:'BD-GZ-BIZ',    vendor:'Bitdefender PH',     specs:'Next-Gen AV, EDR, 1 Endpoint 1yr',            lineItem:'LI-S02' },
+      { id:'P018', name:'ManageEngine IT Help Desk Plus',  category:'softwareLicense', subcategory:'ITSM',         price:85000, stock:999, unit:'license/yr',  sku:'ME-ITHDP-1Y',  vendor:'ManageEngine PH',    specs:'ITSM Platform, 5 Techs, 1yr',                 lineItem:'LI-S03' },
+      { id:'P019', name:'AutoCAD LT Subscription',         category:'softwareLicense', subcategory:'CAD',          price:18000, stock:999, unit:'license/yr',  sku:'ADSK-ACAD-LT', vendor:'Autodesk PH',        specs:'2D Drafting, 1 User 1yr',                     lineItem:'LI-S04' },
       // Service
-      { id:'P020', name:'AWS EC2 Reserved Instance 1yr',   category:'service', subcategory:'Cloud Hosting', price:120000, stock:999, unit:'instance/yr', sku:'AWS-EC2-RI1Y',  vendor:'Amazon Web Services', specs:'t3.large, 2 vCPU, 8GB RAM, 1yr Reserved',   lineItem:'LI-V01' },
-      { id:'P021', name:'Azure Virtual Machine B2s 1yr',   category:'service', subcategory:'Cloud Hosting', price:95000,  stock:999, unit:'instance/yr', sku:'AZ-VM-B2S-1Y',  vendor:'Microsoft Azure',     specs:'2 vCPU, 4GB RAM, Windows Server, 1yr',       lineItem:'LI-V01' },
-      { id:'P022', name:'Annual Hardware Maintenance SLA', category:'service', subcategory:'Maintenance',   price:45000,  stock:999, unit:'contract/yr', sku:'SVC-HW-SLA',    vendor:'IT Solutions PH',     specs:'Preventive Maintenance, On-site Support, 1yr',lineItem:'LI-V02' },
-      { id:'P023', name:'Network Monitoring Service 1yr',  category:'service', subcategory:'Managed Svc',   price:60000,  stock:999, unit:'service/yr',  sku:'SVC-NOC-1YR',   vendor:'IT Solutions PH',     specs:'24/7 NOC, Alerting, Monthly Reports, 1yr',   lineItem:'LI-V03' },
-      { id:'P024', name:'IT Consulting Package (40hrs)',   category:'service', subcategory:'Consulting',    price:80000,  stock:999, unit:'package',     sku:'SVC-CONS-40H',  vendor:'TechConsult PH',      specs:'Senior IT Consultant, 40 hours',              lineItem:'LI-V04' },
+      { id:'P020', name:'AWS EC2 Reserved Instance 1yr',   category:'service', subcategory:'Cloud Hosting', price:120000, stock:999, unit:'instance/yr', sku:'AWS-EC2-RI1Y',  vendor:'Amazon Web Services',  specs:'t3.large, 2 vCPU, 8GB RAM, 1yr Reserved',    lineItem:'LI-V01' },
+      { id:'P021', name:'Azure Virtual Machine B2s 1yr',   category:'service', subcategory:'Cloud Hosting', price:95000,  stock:999, unit:'instance/yr', sku:'AZ-VM-B2S-1Y',  vendor:'Microsoft Azure',      specs:'2 vCPU, 4GB RAM, Windows Server, 1yr',        lineItem:'LI-V01' },
+      { id:'P022', name:'Annual Hardware Maintenance SLA', category:'service', subcategory:'Maintenance',   price:45000,  stock:999, unit:'contract/yr', sku:'SVC-HW-SLA',    vendor:'IT Solutions PH',      specs:'Preventive Maintenance, On-site Support, 1yr', lineItem:'LI-V02' },
+      { id:'P023', name:'Network Monitoring Service 1yr',  category:'service', subcategory:'Managed Svc',   price:60000,  stock:999, unit:'service/yr',  sku:'SVC-NOC-1YR',   vendor:'IT Solutions PH',      specs:'24/7 NOC, Alerting, Monthly Reports, 1yr',    lineItem:'LI-V03' },
+      { id:'P024', name:'IT Consulting Package (40hrs)',   category:'service', subcategory:'Consulting',    price:80000,  stock:999, unit:'package',     sku:'SVC-CONS-40H',  vendor:'TechConsult PH',       specs:'Senior IT Consultant, 40 hours',               lineItem:'LI-V04' },
     ]
   },
 
   getVendors: async () => {
     await delay(300)
     return [
-      { id:'V001', name:'Dell Philippines',    category:'Hardware',  contact:'02-8888-3355', email:'sales.ph@dell.com',         accredited:true  },
-      { id:'V002', name:'Lenovo PH',           category:'Hardware',  contact:'02-7703-2700', email:'sales@lenovo.com.ph',        accredited:true  },
-      { id:'V003', name:'HP Philippines',      category:'Hardware',  contact:'02-8892-8100', email:'hp-sales@hp.com',            accredited:true  },
-      { id:'V004', name:'Cisco Philippines',   category:'Network',   contact:'02-8841-2000', email:'cisco-ph@cisco.com',         accredited:true  },
-      { id:'V005', name:'IT Solutions PH',     category:'Various',   contact:'09171234567',  email:'sales@itsolutions.com.ph',   accredited:true  },
-      { id:'V006', name:'Microsoft PH',        category:'Software',  contact:'1800-1441-0304',email:'mssales@microsoft.com',    accredited:true  },
-      { id:'V007', name:'Adobe Systems',       category:'Software',  contact:'1-800-833-6687',email:'adobe@adobe.com',          accredited:true  },
-      { id:'V008', name:'Kaspersky PH',        category:'Security',  contact:'09272345678',  email:'sales@kaspersky.com.ph',     accredited:false },
-      { id:'V009', name:'Amazon Web Services', category:'Cloud',     contact:'1800-1315-2100',email:'aws-ph@amazon.com',        accredited:true  },
-      { id:'V010', name:'Microsoft Azure',     category:'Cloud',     contact:'1800-1441-0304',email:'azure@microsoft.com',      accredited:true  },
-      { id:'V011', name:'Google PH',           category:'Cloud',     contact:'02-8849-5858', email:'google-sales@google.com',    accredited:true  },
-      { id:'V012', name:'ManageEngine PH',     category:'ITSM',      contact:'1800-1000-6300',email:'sales@manageengine.com.ph',accredited:true  },
-      { id:'V013', name:'Logitech PH',         category:'Peripherals',contact:'02-7903-1234',email:'logitech@logitech.com.ph',  accredited:true  },
-      { id:'V014', name:'APC Schneider',       category:'Power',     contact:'02-8799-2000', email:'apc@schneider-electric.com', accredited:true  },
-      { id:'V015', name:'Bitdefender PH',      category:'Security',  contact:'09171230001',  email:'sales@bitdefender.com.ph',   accredited:false },
+      { id:'V001', name:'Dell Philippines',    category:'Hardware',   contact:'02-8888-3355',  email:'sales.ph@dell.com',          accredited:true  },
+      { id:'V002', name:'Lenovo PH',           category:'Hardware',   contact:'02-7703-2700',  email:'sales@lenovo.com.ph',         accredited:true  },
+      { id:'V003', name:'HP Philippines',      category:'Hardware',   contact:'02-8892-8100',  email:'hp-sales@hp.com',             accredited:true  },
+      { id:'V004', name:'Cisco Philippines',   category:'Network',    contact:'02-8841-2000',  email:'cisco-ph@cisco.com',          accredited:true  },
+      { id:'V005', name:'IT Solutions PH',     category:'Various',    contact:'09171234567',   email:'sales@itsolutions.com.ph',    accredited:true  },
+      { id:'V006', name:'Microsoft PH',        category:'Software',   contact:'1800-1441-0304', email:'mssales@microsoft.com',     accredited:true  },
+      { id:'V007', name:'Adobe Systems',       category:'Software',   contact:'1-800-833-6687', email:'adobe@adobe.com',           accredited:true  },
+      { id:'V008', name:'Kaspersky PH',        category:'Security',   contact:'09272345678',   email:'sales@kaspersky.com.ph',      accredited:false },
+      { id:'V009', name:'Amazon Web Services', category:'Cloud',      contact:'1800-1315-2100', email:'aws-ph@amazon.com',         accredited:true  },
+      { id:'V010', name:'Microsoft Azure',     category:'Cloud',      contact:'1800-1441-0304', email:'azure@microsoft.com',       accredited:true  },
+      { id:'V011', name:'Google PH',           category:'Cloud',      contact:'02-8849-5858',  email:'google-sales@google.com',     accredited:true  },
+      { id:'V012', name:'ManageEngine PH',     category:'ITSM',       contact:'1800-1000-6300', email:'sales@manageengine.com.ph', accredited:true  },
+      { id:'V013', name:'Logitech PH',         category:'Peripherals', contact:'02-7903-1234', email:'logitech@logitech.com.ph',   accredited:true  },
+      { id:'V014', name:'APC Schneider',       category:'Power',      contact:'02-8799-2000',  email:'apc@schneider-electric.com',  accredited:true  },
+      { id:'V015', name:'Bitdefender PH',      category:'Security',   contact:'09171230001',   email:'sales@bitdefender.com.ph',    accredited:false },
+      { id:'V016', name:'TechConsult PH',      category:'Consulting', contact:'09189876543',   email:'hello@techconsult.com.ph',    accredited:true  },
+      { id:'V017', name:'Autodesk PH',         category:'CAD/Design', contact:'1800-1235-7999', email:'autodesk-ph@autodesk.com',  accredited:true  },
     ]
   },
 }
 
-// ── REQUESTS ──────────────────────────────────────────────────────
+// ── REQUESTS (Purchase Requests) ──────────────────────────────────
 export const requestsAPI = {
+  // Read all — returns live DB array (newest first)
   getAll: async () => {
     await delay(500)
-    return [
-      { id:'REQ-2025-0214', title:'Laptops for New Admin Hires', requestedBy:'Maria Santos', requestorRole:'regular_staff', department:'Administration', date:'2025-05-02', category:'hardware', lineItem:'LI-H01', lineItemName:'Endpoint Devices', items:[{productId:'P001',name:'Dell Latitude 5540 Laptop',qty:3,unitPrice:35000,sku:'DL-LAT-5540'}], total:105000, status:'pending',    priority:'high',   note:'3 new hires starting June 1.', feedback:'', changeJustification:'' },
-      { id:'REQ-2025-0213', title:'Network Switch Replacement',   requestedBy:'Juan Cruz',    requestorRole:'it_staff',      department:'IT',             date:'2025-05-01', category:'hardware', lineItem:'LI-H02', lineItemName:'Network Equipment',  items:[{productId:'P006',name:'Cisco Catalyst 2960-X',qty:2,unitPrice:85000,sku:'CS-CAT-2960X'}],    total:170000, status:'approved',   priority:'high',   note:'Current switches failing.', feedback:'Approved. PO issued.', changeJustification:'' },
-      { id:'REQ-2025-0212', title:'Microsoft 365 Renewal',        requestedBy:'Ana Reyes',    requestorRole:'regular_staff', department:'Finance',        date:'2025-04-30', category:'softwareLicense', lineItem:'LI-S01', lineItemName:'Productivity & SaaS', items:[{productId:'P013',name:'Microsoft 365 Business Premium',qty:10,unitPrice:4750,sku:'MS-365-BP'}], total:47500, status:'approved', priority:'medium', note:'Licenses expire May 15.', feedback:'Approved.', changeJustification:'' },
-      { id:'REQ-2025-0211', title:'Antivirus Renewal – Finance',   requestedBy:'Ana Reyes',    requestorRole:'regular_staff', department:'Finance',        date:'2025-04-28', category:'softwareLicense', lineItem:'LI-S02', lineItemName:'Security Software',   items:[{productId:'P016',name:'Kaspersky Endpoint Security',qty:20,unitPrice:1340,sku:'KS-ES-1YR'}],  total:26800, status:'for_review',priority:'high',   note:'Licenses expire May 1.', feedback:'', changeJustification:'' },
-      { id:'REQ-2025-0210', title:'HR Peripherals Upgrade',        requestedBy:'Lisa Bautista',requestorRole:'regular_staff', department:'HR',             date:'2025-04-25', category:'hardware', lineItem:'LI-H03', lineItemName:'Peripherals', items:[{productId:'P008',name:'Logitech MX Keys S',qty:5,unitPrice:5200,sku:'LG-MXK-S'},{productId:'P009',name:'Logitech MX Master 3S',qty:5,unitPrice:4800,sku:'LG-MXM-3S'}], total:50000, status:'rejected', priority:'low', note:'Upgrade request.', feedback:'Rejected – defer to Q3.', changeJustification:'' },
-      { id:'REQ-2025-0209', title:'Server Storage Expansion',      requestedBy:'Juan Cruz',    requestorRole:'it_staff',      department:'IT',             date:'2025-04-22', category:'hardware', lineItem:'LI-H04', lineItemName:'Servers & Storage',   items:[{productId:'P010',name:'Dell PowerEdge R750',qty:1,unitPrice:350000,sku:'DL-PE-R750'}],         total:350000, status:'approved',  priority:'high',   note:'Server at 90% capacity.', feedback:'Approved.', changeJustification:'' },
-    ]
+    return [...DB.purchaseRequests].reverse()
+  },
+
+  // Read for a specific user
+  getByUser: async (userName) => {
+    await delay(350)
+    return DB.purchaseRequests.filter(r => r.requestedBy === userName)
+  },
+
+  // ── CREATE — called by Shop when staff submits cart ──────────────
+  addRequest: async (request) => {
+    await delay(400)
+    const id = `REQ-2025-${String(DB.purchaseRequests.length + 100).padStart(4, '0')}`
+    const newReq = {
+      id, ...request,
+      status:     'pending',
+      feedback:   '',
+      approvedBy: '',
+      createdAt:  new Date().toISOString(),
+    }
+    DB.purchaseRequests.unshift(newReq)          // newest first
+    eventBus.emit('request:created', newReq)
+    return newReq
+  },
+
+  // ── APPROVE ───────────────────────────────────────────────────────
+  approveRequest: async (id, approvedBy = 'Admin') => {
+    await delay(400)
+    const req = DB.purchaseRequests.find(r => r.id === id)
+    if (!req) throw new Error(`Request ${id} not found`)
+    req.status     = 'approved'
+    req.approvedBy = approvedBy
+    req.feedback   = req.feedback || 'Approved.'
+    req.approvedAt = new Date().toISOString()
+    eventBus.emit('request:approved', req)
+    return req
+  },
+
+  // ── REJECT ────────────────────────────────────────────────────────
+  rejectRequest: async (id, feedback = '', approvedBy = '') => {
+    await delay(400)
+    const req = DB.purchaseRequests.find(r => r.id === id)
+    if (!req) throw new Error(`Request ${id} not found`)
+    req.status     = 'rejected'
+    req.approvedBy = approvedBy
+    req.feedback   = feedback || 'Rejected by approver.'
+    req.rejectedAt = new Date().toISOString()
+    eventBus.emit('request:rejected', req)
+    return req
+  },
+
+  // ── STATUS UPDATE (generic, for PO issued / received flow) ───────
+  updateStatus: async (id, status, patch = {}) => {
+    await delay(300)
+    const req = DB.purchaseRequests.find(r => r.id === id)
+    if (!req) throw new Error(`Request ${id} not found`)
+    Object.assign(req, { status, ...patch, updatedAt: new Date().toISOString() })
+    eventBus.emit('request:updated', req)
+    return req
   },
 }
 
@@ -304,26 +424,27 @@ export const requestsAPI = {
 export const accessAPI = {
   getUsers: async () => {
     await delay(450)
-    return DB.users.map(({password:_,...u}) => ({
-      ...u, status:'active', lastLogin: u.id===1?'2025-05-03 08:14':u.id===2?'2025-05-03 09:02':'2025-05-02 14:30',
+    return DB.users.map(({ password:_, ...u }) => ({
+      ...u, status: 'active',
+      lastLogin: u.id === 1 ? '2025-05-03 08:14' : u.id === 2 ? '2025-05-03 09:02' : '2025-05-02 14:30',
     }))
   },
   getRoles: async () => {
     await delay(280)
     return [
       { id:'admin',         label:'Administrator',  color:'#ef4444', desc:'Full system access.', permissions:['Manage Budget Allocations','Set Fiscal Year Budget','Add/Edit Line Items','Log & Approve Expenses','View All Reports','Export Excel/PDF','Manage Users','Receive Over-Budget Alerts'] },
-      { id:'it_staff',      label:'IT Staff',        color:'#06b6d4', desc:'IT Department operations.', permissions:['Log Expenses','Process Purchase Requests','Browse Catalog','Approve Requests','View IT Budget','Receive Budget Alerts','View Reports'] },
-      { id:'regular_staff', label:'Regular Staff',   color:'#10b981', desc:'Submit requests only.', permissions:['Submit Purchase Requests','View Own Request Status','View Dept Budget Summary'] },
+      { id:'it_staff',      label:'IT Staff',        color:'#06b6d4', desc:'IT Department operations.', permissions:['Log Expenses','Process Purchase Requests','Browse Catalog','Approve Requests','Issue Purchase Orders','View IT Budget','Receive Budget Alerts','View Reports'] },
+      { id:'regular_staff', label:'Regular Staff',   color:'#10b981', desc:'Submit requests only.', permissions:['Browse IT Catalog','Submit Purchase Requests','View Own Request Status','View Dept Budget Summary'] },
     ]
   },
 }
 
 // ── REPORTS ───────────────────────────────────────────────────────
 export const reportsAPI = {
-  getSummary: async () => { await delay(380); return computeBudgetSummary() },
-  getMonthlyData: async () => { await delay(500); return DB.monthlyData },
-  getQuarterlyData: async () => { await delay(450); return DB.quarterlyData },
-  getVarianceReport: async () => { await delay(500); return await budgetAPI.getVarianceReport() },
+  getSummary:          async () => { await delay(380); return computeBudgetSummary() },
+  getMonthlyData:      async () => { await delay(500); return DB.monthlyData },
+  getQuarterlyData:    async () => { await delay(450); return DB.quarterlyData },
+  getVarianceReport:   async () => { await delay(500); return await budgetAPI.getVarianceReport() },
   getExpensesByCategory: async () => {
     await delay(400)
     const s = computeBudgetSummary()
@@ -356,8 +477,11 @@ export const notificationsAPI = {
       if (cat.pct >= 90) alerts.push({ id:`alert-${key}-crit`, type:'alert',   msg:`CRITICAL: ${cat.label} budget at ${cat.pct}% — only ₱${cat.remaining.toLocaleString()} remaining`, time:'Just now', read:false })
       else if (cat.pct >= 80) alerts.push({ id:`alert-${key}-warn`, type:'alert', msg:`Warning: ${cat.label} budget at ${cat.pct}% — ₱${cat.remaining.toLocaleString()} remaining`, time:'1 hr ago', read:false })
     })
+    // Count pending requests for badges
+    const pendingReqs = DB.purchaseRequests.filter(r => r.status === 'pending' || r.status === 'for_review').length
     const all = {
       admin: [...alerts,
+        ...(pendingReqs > 0 ? [{ id:'n-pend', type:'approval', msg:`${pendingReqs} purchase request${pendingReqs > 1 ? 's' : ''} awaiting your approval`, time:'Just now', read:false }] : []),
         { id:'n1', type:'approval', msg:'REQ-2025-0211 awaiting your approval (Antivirus Renewal)', time:'2 hrs ago', read:false },
         { id:'n2', type:'info',     msg:'Q2 Variance Report is ready for review',                    time:'3 hrs ago', read:true  },
         { id:'n3', type:'success',  msg:'Q2 2025 budget released — ₱5,000,000 total allocation',      time:'2 days ago',read:true  },
@@ -379,21 +503,35 @@ export const notificationsAPI = {
 
 // ── SETTINGS ─────────────────────────────────────────────────────
 export const settingsAPI = {
-  getProfile: async () => { await delay(300); return { name:'System Administrator', username:'admin', email:'admin@prisma.gov.ph', department:'IT & Operations', phone:'+63 917 123 4567', role:'Administrator', joinDate:'January 15, 2024' } },
-  getSystemSettings: async () => { await delay(250); return { fiscalYear:'2025', currency:'PHP', timezone:'Asia/Manila', dateFormat:'MM/DD/YYYY', approvalThreshold:50000, autoApprove:false, emailNotifications:true, smsAlerts:false, budgetWarningPct:80, twoFactorAuth:false } },
+  getProfile: async () => {
+    await delay(300)
+    return { name:'System Administrator', username:'admin', email:'admin@prisma.gov.ph', department:'IT & Operations', phone:'+63 917 123 4567', role:'Administrator', joinDate:'January 15, 2024' }
+  },
+  getSystemSettings: async () => {
+    await delay(250)
+    return { fiscalYear:'2025', currency:'PHP', timezone:'Asia/Manila', dateFormat:'MM/DD/YYYY', approvalThreshold:50000, autoApprove:false, emailNotifications:true, smsAlerts:false, budgetWarningPct:80, twoFactorAuth:false }
+  },
 }
 
-// Compatibility aliases
+// ── COMPATIBILITY ALIASES ─────────────────────────────────────────
 export const budgetAPICompat = budgetAPI
+
 export const procurementAPI = {
   getRecentActivity: async () => {
     await delay(400)
     return DB.expenses.slice(-6).reverse().map(e => ({
-      id: e.id, item: e.description, department: e.category === 'hardware' ? 'IT' : 'IT',
-      amount: e.amount, status: e.status, date: e.date, requestedBy: e.approvedBy || 'Pending'
+      id: e.id, item: e.description, department: 'IT',
+      amount: e.amount, status: e.status, date: e.date,
+      requestedBy: e.approvedBy || 'Pending',
     }))
   },
-  getMonthlySpending: async () => { await delay(500); return DB.monthlyData.slice(0,6).map(m=>({month:m.month.split(' ')[0],spent:m.actual,budget:m.planned,hardware:m.hardware,softwareLicense:m.softwareLicense,service:m.service})) },
+  getMonthlySpending: async () => {
+    await delay(500)
+    return DB.monthlyData.slice(0, 6).map(m => ({
+      month: m.month.split(' ')[0], spent: m.actual, budget: m.planned,
+      hardware: m.hardware, softwareLicense: m.softwareLicense, service: m.service,
+    }))
+  },
   getDepartmentBreakdown: async () => {
     await delay(400)
     return [

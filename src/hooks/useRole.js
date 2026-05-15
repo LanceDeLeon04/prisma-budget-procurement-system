@@ -1,35 +1,32 @@
-import { useSelector } from 'react-redux'
+import { useState, useEffect } from 'react'
 
+/**
+ * useRole – reads the authenticated user from sessionStorage (set on login)
+ * Exposes: user, role, isAdmin, isITStaff, isStaff, setUser
+ */
 export function useRole() {
-  const user = useSelector(s => s.auth.user)
-  const role = user?.role || null
-  return {
-    user,
-    role,
-    isAdmin:   role === 'admin',
-    isITStaff: role === 'it_staff',
-    isStaff:   role === 'regular_staff',
-    can: (action) => PERMISSIONS[role]?.includes(action) ?? false,
-  }
-}
+  const [user, setUserState] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('prisma_user')
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  })
 
-export const PERMISSIONS = {
-  admin: [
-    'view_dashboard','view_shop','view_requests','view_budget',
-    'view_reports','view_access','view_settings',
-    'approve_requests','deny_requests','manage_users',
-    'manage_catalog','manage_suppliers','set_budget','add_line_items',
-    'view_all_reports','receive_budget_alerts',
-  ],
-  it_staff: [
-    'view_dashboard','view_shop','view_requests','view_budget',
-    'view_reports_own',
-    'approve_requests','deny_requests','change_order_items',
-    'receive_budget_alerts',
-  ],
-  regular_staff: [
-    'view_dashboard_staff','view_shop_browse','view_requests_own',
-    'submit_requests','view_budget_own',
-    'view_reports_dept',
-  ],
+  const setUser = (u) => {
+    if (u) {
+      sessionStorage.setItem('prisma_user', JSON.stringify(u))
+    } else {
+      sessionStorage.removeItem('prisma_user')
+    }
+    setUserState(u)
+  }
+
+  const role      = user?.role ?? 'regular_staff'
+  const isAdmin   = role === 'admin'
+  const isITStaff = role === 'it_staff'
+  const isStaff   = role === 'regular_staff'
+
+  return { user, role, isAdmin, isITStaff, isStaff, setUser }
 }

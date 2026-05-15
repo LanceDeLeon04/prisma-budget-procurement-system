@@ -1,133 +1,204 @@
 import { useEffect, useState } from 'react'
-import { useSelector } from 'react-redux'
 import PageLayout from '../components/PageLayout'
-import { settingsAPI } from '../services/api'
+import { settingsAPI, budgetAPI } from '../services/api'
 import { useRole } from '../hooks/useRole'
 
+const NAV = [
+  { key: 'profile',   label: 'Profile',          icon: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z' },
+  { key: 'system',    label: 'System',            icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' },
+  { key: 'budget',    label: 'Budget Settings',  icon: 'M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' },
+  { key: 'notif',     label: 'Notifications',     icon: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0' },
+]
+
+const Icon = ({ d }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d={d}/>
+  </svg>
+)
+
+const Toggle = ({ on, onChange, label, desc }) => (
+  <div className="toggle-row" onClick={() => onChange(!on)}>
+    <div className="toggle-info">
+      <div className="toggle-label">{label}</div>
+      {desc && <div className="toggle-desc">{desc}</div>}
+    </div>
+    <div className={`toggle-sw${on ? ' on' : ''}`}>
+      <div className="toggle-knob"/>
+    </div>
+  </div>
+)
+
 export default function Settings() {
-  const { user } = useRole()
-  const [profile, setProfile] = useState(null)
-  const [sys, setSys] = useState(null)
-  const [tab, setTab] = useState('profile')
-  const [saved, setSaved] = useState(false)
+  const { user, isAdmin } = useRole()
+  const [activeSection, setActiveSection] = useState('profile')
+  const [profile,  setProfile]  = useState(null)
+  const [sysSet,   setSysSet]   = useState(null)
+  const [summary,  setSummary]  = useState(null)
+  const [saved,    setSaved]    = useState(false)
+  const [notifs,   setNotifs]   = useState({ email: true, sms: false, budget: true, approval: true })
 
-  useEffect(() => { settingsAPI.getProfile().then(setProfile); settingsAPI.getSystemSettings().then(setSys) }, [])
+  useEffect(() => {
+    settingsAPI.getProfile().then(setProfile)
+    settingsAPI.getSystemSettings().then(setSysSet)
+    budgetAPI.getSummary().then(setSummary)
+  }, [])
 
-  const save = () => { setSaved(true); setTimeout(() => setSaved(false), 2200) }
-  const toggle = k => setSys(p => ({ ...p, [k]: !p[k] }))
+  const handleSave = () => {
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2400)
+  }
 
-  const TABS = [{ key:'profile',label:'Profile' },{ key:'system',label:'System' },{ key:'notifications',label:'Notifications' },{ key:'security',label:'Security' }]
+  const fmt = n => '₱' + Number(n ?? 0).toLocaleString()
 
   return (
-    <PageLayout title="Settings" subtitle="Configure your profile, system preferences and security" badge="Settings"
-      actions={<button className="btn btn-primary btn-sm" onClick={save} style={saved?{background:'linear-gradient(135deg,#10b981,#059669)'}:{}}>{saved?'Saved!':'Save Changes'}</button>}
-    >
+    <PageLayout title="Settings" subtitle="System configuration, profile, and budget preferences" badge="Settings">
       <div className="settings-layout">
-        <aside className="settings-sidebar">
-          {TABS.map(t => (
-            <button key={t.key} className={`settings-nav-item${tab===t.key?' active':''}`} onClick={()=>setTab(t.key)}>{t.label}</button>
+        {/* ── Settings sidebar ──────────────────────────────── */}
+        <div className="settings-sidebar">
+          {NAV.filter(n => isAdmin || n.key === 'profile' || n.key === 'notif').map(n => (
+            <button key={n.key} className={`settings-nav-item${activeSection === n.key ? ' active' : ''}`}
+              onClick={() => setActiveSection(n.key)}>
+              <Icon d={n.icon}/> {n.label}
+            </button>
           ))}
           <div className="settings-divider"/>
-          <div className="settings-ver"><div className="settings-ver-lbl">PRISMA System</div><div className="settings-ver-val">v1.0.0 · Build 2025.05</div></div>
-        </aside>
+          <div className="settings-ver">
+            <div className="settings-ver-lbl">PRISMA</div>
+            <div className="settings-ver-val">v2.0.0 · ITIL Aligned</div>
+          </div>
+        </div>
 
+        {/* ── Settings content ──────────────────────────────── */}
         <div className="settings-content">
-          {tab==='profile' && profile && (
+
+          {/* PROFILE */}
+          {activeSection === 'profile' && (
             <div className="settings-panel">
               <div className="settings-panel-title">Profile Information</div>
-              <div className="settings-panel-desc">Update your personal details and account information</div>
+              <div className="settings-panel-desc">Your personal account details and contact information.</div>
               <div className="profile-av-block">
-                <div className="profile-av">{user?.name?.charAt(0)||'A'}</div>
-                <div><div className="profile-av-name">{profile.name}</div><div className="profile-av-role">{profile.role}</div>
-                  <button className="btn btn-ghost btn-sm" style={{marginTop:8}}>Change Photo</button>
+                <div className="profile-av">{user?.avatar ?? 'U'}</div>
+                <div>
+                  <div className="profile-av-name">{profile?.name ?? user?.name ?? '—'}</div>
+                  <div className="profile-av-role">{profile?.role ?? user?.role ?? '—'} · {profile?.department ?? user?.department}</div>
                 </div>
               </div>
               <div className="settings-form-grid">
-                {[{l:'Full Name',v:profile.name,t:'text'},{l:'Username',v:profile.username,t:'text'},{l:'Email Address',v:profile.email,t:'email'},{l:'Phone Number',v:profile.phone,t:'tel'},{l:'Department',v:profile.department,t:'text'},{l:'Join Date',v:profile.joinDate,t:'text',ro:true}].map(f=>(
-                  <div key={f.l} className="settings-form-field">
-                    <label className="field-label">{f.l}</label>
-                    <input className="field-input" type={f.t} defaultValue={f.v} readOnly={f.ro} style={f.ro?{background:'#f8fafc',cursor:'default'}:{}}/>
+                {[
+                  { label: 'Full Name',   val: profile?.name },
+                  { label: 'Username',    val: profile?.username },
+                  { label: 'Email',       val: profile?.email },
+                  { label: 'Department',  val: profile?.department },
+                  { label: 'Phone',       val: profile?.phone },
+                  { label: 'Date Joined', val: profile?.joinDate },
+                ].map(f => (
+                  <div key={f.label} className="settings-form-field">
+                    <label className="field-label">{f.label}</label>
+                    <input className="field-input" defaultValue={f.val ?? ''} readOnly={f.label === 'Date Joined' || f.label === 'Username'}
+                      style={{ opacity: (f.label === 'Date Joined' || f.label === 'Username') ? .6 : 1 }}/>
                   </div>
                 ))}
+              </div>
+              <div style={{ marginTop: 20, display: 'flex', gap: 10 }}>
+                <button className="btn btn-primary" onClick={handleSave}>{saved ? '✓ Saved' : 'Save Changes'}</button>
+                <button className="btn btn-ghost">Change Password</button>
               </div>
             </div>
           )}
 
-          {tab==='system' && sys && (
+          {/* SYSTEM (admin only) */}
+          {activeSection === 'system' && isAdmin && (
             <div className="settings-panel">
-              <div className="settings-panel-title">System Configuration</div>
-              <div className="settings-panel-desc">Fiscal year, currency, and approval settings</div>
+              <div className="settings-panel-title">System Settings</div>
+              <div className="settings-panel-desc">Fiscal year, currency, approval thresholds, and regional preferences.</div>
               <div className="settings-form-grid">
-                {[{l:'Fiscal Year',v:sys.fiscalYear},{l:'Currency',v:sys.currency},{l:'Timezone',v:sys.timezone},{l:'Date Format',v:sys.dateFormat},{l:'Approval Threshold (₱)',v:sys.approvalThreshold},{l:'Budget Warning (%)',v:sys.budgetWarningPct}].map(f=>(
-                  <div key={f.l} className="settings-form-field">
-                    <label className="field-label">{f.l}</label>
-                    <input className="field-input" defaultValue={f.v}/>
+                {[
+                  { label: 'Fiscal Year',         val: sysSet?.fiscalYear,          type: 'text' },
+                  { label: 'Currency',             val: sysSet?.currency,            type: 'text' },
+                  { label: 'Timezone',             val: sysSet?.timezone,            type: 'text' },
+                  { label: 'Date Format',          val: sysSet?.dateFormat,          type: 'text' },
+                  { label: 'Approval Threshold (₱)', val: sysSet?.approvalThreshold, type: 'number' },
+                  { label: 'Budget Warning (%)',   val: sysSet?.budgetWarningPct,    type: 'number' },
+                ].map(f => (
+                  <div key={f.label} className="settings-form-field">
+                    <label className="field-label">{f.label}</label>
+                    <input className="field-input" type={f.type} defaultValue={f.val ?? ''}/>
                   </div>
                 ))}
               </div>
-              <div style={{marginTop:20}}>
-                <Toggle label="Auto-Approve Small Requests" desc="Automatically approve requests under ₱5,000" val={sys.autoApprove} onChange={()=>toggle('autoApprove')}/>
+              <div className="toggle-list" style={{ marginTop: 20 }}>
+                <Toggle on={sysSet?.autoApprove ?? false} onChange={() => {}}
+                  label="Auto-approve low-value requests"
+                  desc={`Automatically approve requests below ₱${(sysSet?.approvalThreshold ?? 0).toLocaleString()}`}/>
+                <Toggle on={sysSet?.twoFactorAuth ?? false} onChange={() => {}}
+                  label="Two-Factor Authentication"
+                  desc="Require 2FA for all admin logins"/>
+              </div>
+              <div style={{ marginTop: 20, display: 'flex', gap: 10 }}>
+                <button className="btn btn-primary" onClick={handleSave}>{saved ? '✓ Saved' : 'Save Settings'}</button>
+              </div>
+              <div className="danger-zone">
+                <div className="danger-zone-title">⚠ Danger Zone</div>
+                <div className="danger-zone-desc">These actions are irreversible. Proceed with caution.</div>
+                <button className="btn btn-danger btn-sm">Reset All Budget Data</button>
               </div>
             </div>
           )}
 
-          {tab==='notifications' && sys && (
+          {/* BUDGET SETTINGS (admin only) */}
+          {activeSection === 'budget' && isAdmin && (
+            <div className="settings-panel">
+              <div className="settings-panel-title">Budget Configuration</div>
+              <div className="settings-panel-desc">FY 2025 allocation per ITIL category. Changes take effect immediately.</div>
+              {summary && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 24 }}>
+                  {[
+                    { key: 'hardware',        label: 'Hardware (CapEx)',        color: '#3b82f6', cat: summary.categories?.hardware },
+                    { key: 'softwareLicense', label: 'SW License (OpEx)',       color: '#8b5cf6', cat: summary.categories?.softwareLicense },
+                    { key: 'service',         label: 'Service (OpEx)',          color: '#06b6d4', cat: summary.categories?.service },
+                  ].map(c => (
+                    <div key={c.key} style={{ background: '#f8fafc', border: `1.5px solid ${c.color}30`, borderRadius: 14, padding: '16px 18px' }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: c.color, fontFamily: 'JetBrains Mono,monospace', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10 }}>{c.label}</div>
+                      <div className="settings-form-field">
+                        <label className="field-label">Allocated (₱)</label>
+                        <input className="field-input" type="number" defaultValue={c.cat?.allocated ?? 0} style={{ borderColor: `${c.color}40` }}/>
+                      </div>
+                      <div style={{ marginTop: 10, fontSize: 12, color: '#64748b', fontFamily: 'JetBrains Mono,monospace' }}>
+                        Spent: {fmt(c.cat?.spent)} · {c.cat?.pct ?? 0}%
+                      </div>
+                      <div style={{ height: 5, background: '#e2e8f0', borderRadius: 100, overflow: 'hidden', marginTop: 6 }}>
+                        <div style={{ height: '100%', width: `${Math.min(c.cat?.pct ?? 0, 100)}%`, background: c.color, borderRadius: 100 }}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button className="btn btn-primary" onClick={handleSave}>{saved ? '✓ Saved' : 'Update Budget Allocations'}</button>
+            </div>
+          )}
+
+          {/* NOTIFICATIONS */}
+          {activeSection === 'notif' && (
             <div className="settings-panel">
               <div className="settings-panel-title">Notification Preferences</div>
-              <div className="settings-panel-desc">Control how and when you receive alerts</div>
+              <div className="settings-panel-desc">Control how and when you receive alerts and updates.</div>
               <div className="toggle-list">
-                <Toggle label="Email Notifications" desc="Receive updates and approvals via email" val={sys.emailNotifications} onChange={()=>toggle('emailNotifications')}/>
-                <Toggle label="SMS Alerts" desc="Get critical alerts via SMS" val={sys.smsAlerts} onChange={()=>toggle('smsAlerts')}/>
-                <Toggle label="Budget Warning Alerts" desc={`Alert when budget reaches ${sys.budgetWarningPct}% utilization`} val={true} onChange={()=>{}}/>
-                <Toggle label="OpEx Overspend Alerts" desc="Immediate alert when OpEx budget is exceeded" val={true} onChange={()=>{}}/>
-                <Toggle label="CapEx Overspend Alerts" desc="Immediate alert when CapEx budget is exceeded" val={true} onChange={()=>{}}/>
-                <Toggle label="Pending Approval Reminders" desc="Daily digest of requests awaiting your action" val={true} onChange={()=>{}}/>
+                <Toggle on={notifs.email}    onChange={v => setNotifs(n => ({ ...n, email: v }))}
+                  label="Email Notifications" desc="Receive notifications via email"/>
+                <Toggle on={notifs.sms}      onChange={v => setNotifs(n => ({ ...n, sms: v }))}
+                  label="SMS Alerts" desc="Receive critical alerts via SMS"/>
+                <Toggle on={notifs.budget}   onChange={v => setNotifs(n => ({ ...n, budget: v }))}
+                  label="Budget Threshold Alerts" desc="Alert when any category exceeds 80% utilization"/>
+                <Toggle on={notifs.approval} onChange={v => setNotifs(n => ({ ...n, approval: v }))}
+                  label="Approval Requests" desc="Notify when a purchase request needs your review"/>
               </div>
-            </div>
-          )}
-
-          {tab==='security' && sys && (
-            <div className="settings-panel">
-              <div className="settings-panel-title">Security Settings</div>
-              <div className="settings-panel-desc">Manage authentication and access policies</div>
-              <div className="toggle-list">
-                <Toggle label="Two-Factor Authentication" desc="Add extra verification on login" val={sys.twoFactorAuth} onChange={()=>toggle('twoFactorAuth')}/>
-                <Toggle label="Session Timeout (30 min)" desc="Auto-logout after 30 minutes of inactivity" val={true} onChange={()=>{}}/>
-                <Toggle label="Login Audit Log" desc="Record all login attempts and user actions" val={true} onChange={()=>{}}/>
-              </div>
-              <div style={{height:1,background:'#f1f5f9',margin:'24px 0'}}/>
-              <div className="settings-panel-title" style={{fontSize:15,marginBottom:3}}>Change Password</div>
-              <div className="settings-panel-desc">Leave blank to keep current password</div>
-              <div className="settings-form-grid" style={{marginTop:16}}>
-                {['Current Password','New Password','Confirm New Password'].map(l=>(
-                  <div key={l} className="settings-form-field">
-                    <label className="field-label">{l}</label>
-                    <input className="field-input" type="password" placeholder="••••••••"/>
-                  </div>
-                ))}
-              </div>
-              <button className="btn btn-primary" style={{marginTop:16}}>Update Password</button>
-              <div className="danger-zone">
-                <div className="danger-zone-title">Danger Zone</div>
-                <div className="danger-zone-desc">These actions are irreversible. Proceed with extreme caution.</div>
-                <div style={{display:'flex',gap:10}}>
-                  <button className="btn btn-danger" onClick={()=>alert('Settings reset!')}>Reset All Settings</button>
-                  <button className="btn btn-danger" onClick={()=>alert('Sessions revoked!')}>Revoke All Sessions</button>
-                </div>
+              <div style={{ marginTop: 20 }}>
+                <button className="btn btn-primary" onClick={handleSave}>{saved ? '✓ Saved' : 'Save Preferences'}</button>
               </div>
             </div>
           )}
         </div>
       </div>
     </PageLayout>
-  )
-}
-
-function Toggle({ label, desc, val, onChange }) {
-  return (
-    <div className="toggle-row" onClick={onChange}>
-      <div className="toggle-info"><div className="toggle-label">{label}</div><div className="toggle-desc">{desc}</div></div>
-      <div className={`toggle-sw${val?' on':''}`}><div className="toggle-knob"/></div>
-    </div>
   )
 }
