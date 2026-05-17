@@ -39,10 +39,14 @@ export default function Budget() {
   const [newExp, setNewExp]       = useState({ date:'', category:'hardware', subcategory:'', description:'', vendor:'', amount:'', lineItem:'LI-H01' })
   const [newLI, setNewLI]         = useState({ name:'', category:'hardware', allocated:'' })
   const [budgetForm, setBudgetForm] = useState({ hardware:'2600000', softwareLicense:'1400000', service:'1000000', fy:'2025' })
+  const [deptBudgets, setDeptBudgets] = useState([])
+  const [showDeptBudget, setShowDeptBudget] = useState(false)
+  const [deptBudgetForm, setDeptBudgetForm] = useState({ dept:'IT', hardware:'', softwareLicense:'', service:'' })
+  const [deptBudgetSaving, setDeptBudgetSaving] = useState(false)
 
   useEffect(() => {
-    Promise.all([budgetAPI.getSummary(), budgetAPI.getLineItems(), expenseAPI.getAll(), budgetAPI.getMonthlyData()]).then(([s,li,ex,m]) => {
-      setSummary(s); setLI(li); setExpenses(ex); setMonthly(m); setLoading(false)
+    Promise.all([budgetAPI.getSummary(), budgetAPI.getLineItems(), expenseAPI.getAll(), budgetAPI.getMonthlyData(), budgetAPI.getAllDeptBudgets()]).then(([s,li,ex,m,db]) => {
+      setSummary(s); setLI(li); setExpenses(ex); setMonthly(m); setDeptBudgets(db.filter(Boolean)); setLoading(false)
     })
   }, [])
 
@@ -83,6 +87,7 @@ export default function Budget() {
     <PageLayout title="Budget & Cost Management" subtitle="IT spending tracking — Hardware, Software License, and Service categories" badge="Budget"
       actions={isAdmin && (
         <div style={{display:'flex',gap:10}}>
+          <button className="btn btn-secondary btn-sm" onClick={()=>setShowDeptBudget(true)}>Dept Budgets</button>
           <button className="btn btn-secondary btn-sm" onClick={()=>setShowSetBudget(true)}>Set FY Budget</button>
           <button className="btn btn-secondary btn-sm" onClick={()=>setShowAddLI(true)}>Add Line Item</button>
           <button className="btn btn-primary btn-sm" onClick={()=>setShowAddExpense(true)}><PlusIcon/> Log Expense</button>
@@ -160,9 +165,9 @@ export default function Budget() {
 
       {/* Tabs */}
       <div className="tabs">
-        {['overview','hardware','softwareLicense','service','expenses','chart'].map(t=>(
+        {[...['overview','hardware','softwareLicense','service','expenses','chart'],...(isAdmin||isITStaff?['deptBudgets']:[])].map(t=>(
           <button key={t} className={`tab${activeTab===t?' active':''}`} onClick={()=>setActiveTab(t)}>
-            {t==='overview'?'All Line Items':t==='softwareLicense'?'Software License':t==='expenses'?'Expense Log':t==='chart'?'Charts':t.charAt(0).toUpperCase()+t.slice(1)}
+            {t==='overview'?'All Line Items':t==='softwareLicense'?'Software License':t==='expenses'?'Expense Log':t==='chart'?'Charts':t==='deptBudgets'?'Dept Budgets':t.charAt(0).toUpperCase()+t.slice(1)}
           </button>
         ))}
       </div>
@@ -196,6 +201,43 @@ export default function Budget() {
               )
             })
           }
+        </div>
+      )}
+
+
+      {/* Dept Budgets Tab */}
+      {activeTab==='deptBudgets' && (isAdmin||isITStaff) && (
+        <div style={{display:'flex',flexDirection:'column',gap:16}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14}}>
+            {deptBudgets.map(d=>{
+              const DCOL={'IT':'#06b6d4','Administration':'#3b82f6','Finance':'#8b5cf6','HR':'#10b981','Marketing':'#f59e0b','Operations':'#ef4444'}
+              const col=DCOL[d.department]||'#06b6d4'
+              return (
+                <div key={d.department} style={{background:'#fff',border:'1.5px solid #f1f5f9',borderRadius:16,padding:'18px 20px',boxShadow:'0 2px 8px rgba(0,0,0,.06)',position:'relative',overflow:'hidden',cursor:'pointer',transition:'box-shadow .2s'}}
+                  onClick={()=>{setDeptBudgetForm({dept:d.department,hardware:d.hardware.allocated,softwareLicense:d.softwareLicense.allocated,service:d.service.allocated});setShowDeptBudget(true)}}
+                  onMouseEnter={e=>e.currentTarget.style.boxShadow='0 8px 24px rgba(0,0,0,.1)'}
+                  onMouseLeave={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,.06)'}>
+                  <div style={{position:'absolute',top:0,left:0,right:0,height:3,background:col}}/>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                    <span style={{fontSize:14,fontWeight:800,color:'#0f172a',fontFamily:'Outfit,sans-serif'}}>{d.department}</span>
+                    <span style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:5,background:`${col}15`,color:col,fontFamily:'JetBrains Mono,monospace'}}>{d.pct}%</span>
+                  </div>
+                  <div style={{fontFamily:'Outfit,sans-serif',fontSize:22,fontWeight:900,color:'#0f172a',marginBottom:2}}>{fmt(d.total)}</div>
+                  <div style={{fontSize:11.5,color:'#94a3b8',fontFamily:'JetBrains Mono,monospace',marginBottom:10}}>total allocated</div>
+                  <div style={{height:6,background:'#f1f5f9',borderRadius:100,overflow:'hidden',marginBottom:8}}>
+                    <div style={{height:'100%',borderRadius:100,background:col,width:`${Math.min(d.pct,100)}%`,transition:'width 1s ease'}}/>
+                  </div>
+                  {[{label:'Hardware',val:d.hardware,color:'#3b82f6'},{label:'SW License',val:d.softwareLicense,color:'#8b5cf6'},{label:'Service',val:d.service,color:'#06b6d4'}].map(c=>(
+                    <div key={c.label} style={{display:'flex',justifyContent:'space-between',fontSize:11,marginTop:4}}>
+                      <span style={{color:'#64748b'}}>{c.label}</span>
+                      <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700,color:c.color}}>{fmt(c.val.allocated)}</span>
+                    </div>
+                  ))}
+                  <div style={{marginTop:8,fontSize:11,color:'#94a3b8',textAlign:'center'}}>Click to edit budget →</div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
@@ -380,6 +422,40 @@ export default function Budget() {
           </div>
         </div>
       )}
+
+      {/* Dept Budget Modal */}
+      {showDeptBudget && isAdmin && (
+        <div className="overlay" onClick={()=>setShowDeptBudget(false)}>
+          <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:480}}>
+            <div className="modal-head"><h2 className="modal-title">Set Department Budget</h2><button className="modal-close" onClick={()=>setShowDeptBudget(false)}>&times;</button></div>
+            <div className="modal-body">
+              <div style={{display:'flex',flexDirection:'column',gap:14}}>
+                <div className="field"><label className="field-label">Department</label>
+                  <select className="field-input field-select" value={deptBudgetForm.dept} onChange={e=>{const db=deptBudgets.find(d=>d.department===e.target.value);setDeptBudgetForm({dept:e.target.value,hardware:db?.hardware.allocated||0,softwareLicense:db?.softwareLicense.allocated||0,service:db?.service.allocated||0})}}>
+                    {['IT','Administration','Finance','HR','Marketing','Operations'].map(d=><option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div className="field"><label className="field-label">Hardware Budget (₱)</label><input className="field-input" type="number" value={deptBudgetForm.hardware} onChange={e=>setDeptBudgetForm(p=>({...p,hardware:e.target.value}))}/></div>
+                <div className="field"><label className="field-label">Software License Budget (₱)</label><input className="field-input" type="number" value={deptBudgetForm.softwareLicense} onChange={e=>setDeptBudgetForm(p=>({...p,softwareLicense:e.target.value}))}/></div>
+                <div className="field"><label className="field-label">Service Budget (₱)</label><input className="field-input" type="number" value={deptBudgetForm.service} onChange={e=>setDeptBudgetForm(p=>({...p,service:e.target.value}))}/></div>
+                <div style={{padding:'10px 14px',background:'rgba(6,182,212,.05)',border:'1px solid rgba(6,182,212,.15)',borderRadius:10,fontSize:13,color:'#0891b2',fontWeight:700}}>
+                  Total: {fmt(Number(deptBudgetForm.hardware||0)+Number(deptBudgetForm.softwareLicense||0)+Number(deptBudgetForm.service||0))}
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn btn-primary" disabled={deptBudgetSaving} onClick={async()=>{
+                setDeptBudgetSaving(true)
+                await budgetAPI.setDeptBudget(deptBudgetForm.dept,{hardware:Number(deptBudgetForm.hardware),softwareLicense:Number(deptBudgetForm.softwareLicense),service:Number(deptBudgetForm.service)})
+                const db=await budgetAPI.getAllDeptBudgets(); setDeptBudgets(db.filter(Boolean))
+                setDeptBudgetSaving(false); setShowDeptBudget(false)
+              }}>{deptBudgetSaving?'Saving...':'Save Dept Budget'}</button>
+              <button className="btn btn-ghost" onClick={()=>setShowDeptBudget(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </PageLayout>
   )
 }

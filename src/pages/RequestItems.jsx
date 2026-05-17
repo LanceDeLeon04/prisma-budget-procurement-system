@@ -9,6 +9,8 @@ const STATUS = {
   pending:    { label:'Pending',     color:'#f59e0b', bg:'rgba(245,158,11,.1)' },
   for_review: { label:'For Review',  color:'#3b82f6', bg:'rgba(59,130,246,.1)' },
   rejected:   { label:'Rejected',    color:'#ef4444', bg:'rgba(239,68,68,.1)'  },
+  po_issued:  { label:'PO Issued',   color:'#8b5cf6', bg:'rgba(139,92,246,.1)' },
+  received:   { label:'Received',    color:'#06b6d4', bg:'rgba(6,182,212,.1)'  },
 }
 const PRI = { high:{label:'High',color:'#ef4444'}, medium:{label:'Medium',color:'#f59e0b'}, low:{label:'Low',color:'#10b981'} }
 
@@ -45,15 +47,27 @@ export default function RequestItems() {
                r.id.toLowerCase().includes(search.toLowerCase())
     return mf && ms
   })
-  const counts = { all:visible.length, pending:visible.filter(r=>r.status==='pending').length, for_review:visible.filter(r=>r.status==='for_review').length, approved:visible.filter(r=>r.status==='approved').length, rejected:visible.filter(r=>r.status==='rejected').length }
+  const counts = { all:visible.length, pending:visible.filter(r=>r.status==='pending').length, for_review:visible.filter(r=>r.status==='for_review').length, approved:visible.filter(r=>r.status==='approved').length, po_issued:visible.filter(r=>r.status==='po_issued').length, received:visible.filter(r=>r.status==='received').length, rejected:visible.filter(r=>r.status==='rejected').length }
 
-  const handleApprove = req => {
-    setRequests(prev => prev.map(r => r.id===req.id ? {...r,status:'approved',feedback:feedback||'Approved.'} : r))
+  const handleApprove = async req => {
+    await requestsAPI.approveRequest(req.id, user?.name)
+    setRequests(prev => prev.map(r => r.id===req.id ? {...r,status:'approved',approvedBy:user?.name,feedback:feedback||'Approved.'} : r))
     setSelected(null); setFeedback('')
   }
-  const handleReject = req => {
-    setRequests(prev => prev.map(r => r.id===req.id ? {...r,status:'rejected',feedback:feedback||'Rejected.'} : r))
+  const handleReject = async req => {
+    await requestsAPI.rejectRequest(req.id, feedback||'Rejected by approver.', user?.name)
+    setRequests(prev => prev.map(r => r.id===req.id ? {...r,status:'rejected',approvedBy:user?.name,feedback:feedback||'Rejected.'} : r))
     setSelected(null); setFeedback('')
+  }
+  const handleIssuePO = async req => {
+    await requestsAPI.updateStatus(req.id,'po_issued',{approvedBy:user?.name,feedback:'Purchase Order issued.'})
+    setRequests(prev => prev.map(r => r.id===req.id ? {...r,status:'po_issued'} : r))
+    setSelected(prev => prev ? {...prev,status:'po_issued'} : null)
+  }
+  const handleReceive = async req => {
+    await requestsAPI.updateStatus(req.id,'received',{approvedBy:user?.name,feedback:'Items received. Budget deducted from department.'})
+    setRequests(prev => prev.map(r => r.id===req.id ? {...r,status:'received'} : r))
+    setSelected(prev => prev ? {...prev,status:'received'} : null)
   }
   const handleChangeOrder = req => {
     if (!changeJust.trim()) return
@@ -212,6 +226,21 @@ export default function RequestItems() {
                   <button className="btn btn-danger" onClick={()=>handleReject(selected)}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Reject
                   </button>
+                  {(selected.status==='approved'||selected.status==='for_review') && (isAdmin||isITStaff) && (
+                    <button className="btn btn-secondary" style={{background:'rgba(139,92,246,.1)',color:'#8b5cf6',border:'1.5px solid rgba(139,92,246,.2)'}} onClick={()=>handleIssuePO(selected)}>
+                      Issue PO
+                    </button>
+                  )}
+                  {selected.status==='po_issued' && (isAdmin||isITStaff) && (
+                    <button className="btn btn-primary" style={{background:'linear-gradient(135deg,#06b6d4,#0891b2)'}} onClick={()=>handleReceive(selected)}>
+                      ✓ Mark as Received
+                    </button>
+                  )}
+                  {selected.status==='received' && (
+                    <div style={{fontSize:12.5,color:'#10b981',fontWeight:700,padding:'8px 14px',borderRadius:8,background:'rgba(16,185,129,.08)',border:'1px solid rgba(16,185,129,.2)'}}>
+                      ✓ Items received — dept budget deducted
+                    </div>
+                  )}
                   {isITStaff && (
                     <button className="btn btn-secondary" onClick={()=>setShowChange(true)}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Change Order
